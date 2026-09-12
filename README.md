@@ -9,7 +9,7 @@ jobhub is the self-hosted hub of that loop: one Go binary, one SQLite file,
 no accounts. A small JSON API for the agents, a dark little dashboard for
 you, and a human approval gate between the two.
 
-![the board](docs/board.jpg)
+![the board](docs/board.png)
 
 ## How it works
 
@@ -30,7 +30,7 @@ The board is shared by any number of seekers via `profile`, filters compose
 through query params (`?profile=&net=&type=&new=1&approved=1&since=7d…`), and
 every board URL is also an API call — the JSON endpoint takes the same params.
 
-![one lead's review page](docs/lead.jpg)
+![one lead's review page](docs/lead.png)
 
 Pages are gated by short per-page keys derived from a single secret
 (`hex(HMAC-SHA256(VIEW_KEY, scope))[:8]`), so a shared link exposes one page,
