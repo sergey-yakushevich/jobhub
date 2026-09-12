@@ -1,9 +1,13 @@
 # jobhub
 
-A self-hosted job-lead board: one Go binary, one SQLite file, no accounts.
-Push scored leads in through a small JSON API (by hand, by script, or by an
-AI agent running your job sweeps), then work them on a dark little dashboard:
-review, approve, apply, reject — every decision with a written reason.
+Run your job hunt on autopilot — without handing over the wheel. Point your
+AI agents at jobhub and they scan the internet for roles that match your
+skills, score them onto your board, prep each application, and apply — but
+nothing is ever sent until you've approved it.
+
+jobhub is the self-hosted hub of that loop: one Go binary, one SQLite file,
+no accounts. A small JSON API for the agents, a dark little dashboard for
+you, and a human approval gate between the two.
 
 ![the board](docs/board.jpg)
 
