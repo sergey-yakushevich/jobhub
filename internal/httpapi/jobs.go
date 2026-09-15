@@ -1238,88 +1238,68 @@ const jobsBoardHTML = `<!doctype html>
 ` + pageHead + `
 <title>jobs</title>
 <style>` + sharedCSS + chartCSS + `
-  h1 { margin:0 0 4px; }
-  .sub { margin-bottom:14px; }
-  .chips { display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; margin-bottom:8px; }
-  .chips .g { color:#5a5a64; font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin-right:2px; }
-  .chip { display:inline-block; border:1px solid #2a2a33; border-radius:999px; padding:1px 10px; color:#8b8b96; }
-  .chip:hover { border-color:#3a3a46; text-decoration:none; }
-  .chip.on { border-color:#5cd58c; color:#5cd58c; }
+  h1 { margin:0; font-size:28px; line-height:36px; font-weight:700; }
+  .top-bar { margin-bottom:16px; }
+  .top-bar .seg { margin-top:4px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px; }
+  .chips .g { color:var(--hint); font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-right:2px; }
+  .chip { background:var(--tertiary); color:var(--hint); border-radius:999px; padding:4px 12px; font-size:13px; font-weight:600; }
+  .chip:hover { text-decoration:none; color:var(--text); }
+  .chip.on, .chip.on:hover { background:var(--accent); color:#FFFFFF; }
   /* Grid rather than flex: with six tiles a flex row leaves the last one
      stretched across a line of its own. */
-  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:8px; margin:16px 0 18px; }
-  .tile { border:1px solid #2a2a33; border-radius:8px; padding:9px 12px; }
-  .tile .n { font-size:18px; font-weight:600; }
-  .tile .k { color:#8b8b96; font-size:12px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; margin-bottom:26px; }
-  .card { border:1px solid #2a2a33; border-radius:8px; padding:10px 12px; min-width:0; }
-  .card h3 { font-size:11px; font-weight:600; color:#8b8b96; letter-spacing:.08em; text-transform:uppercase; margin:0 0 7px; }
-  .card .r { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
-  .card .r .l { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .card .r .c { color:#8b8b96; white-space:nowrap; }
-  .row { display:flex; border:1px solid #2a2a33; border-radius:8px; margin-bottom:12px; }
-  .row.seen { opacity:.55; }
-  .row:hover { border-color:#3a3a46; }
-  /* Applied is the one state worth seeing from across the list, so it colours
-     the whole card and cancels the read-it-already fade. */
-  .row.applied { opacity:1; border-color:#2f5d43; background:#111e18; border-left:3px solid #5cd58c; }
-  .row.applied:hover { border-color:#3c7355; border-left-color:#5cd58c; }
-  .row.applied .out, .row.applied .mark { border-left-color:#22392d; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; margin-top:10px; }
+  .tile { padding:10px 12px; }
+  .tile .n { font-size:20px; font-weight:700; }
+  .tile .k { color:var(--hint); font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-top:12px; }
+  .bd { padding:12px 14px; }
+  .bd h3 { color:var(--hint); font-size:13px; font-weight:500; letter-spacing:.05em; text-transform:uppercase; margin:0 0 6px; }
+  .bd .r { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+  .bd .r .l { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bd .r .c { color:var(--hint); white-space:nowrap; }
+  /* One section holds the whole list, Telegram style: rows divided, not boxed. */
+  .list { margin-top:16px; overflow:hidden; }
+  .row { display:flex; align-items:center; gap:2px; padding:0 8px 0 16px; border-bottom:1px solid var(--divider); }
+  .row:last-child { border-bottom:0; }
+  .row.seen, .row.dup { opacity:.6; }
+  /* Applied is the one state worth seeing from across the list, so it tints
+     the whole row and cancels the read-it-already fade. */
+  .row.applied { opacity:1; background:color-mix(in srgb, var(--ok) 7%, transparent); box-shadow:inset 3px 0 var(--ok); }
   /* Rejected outranks applied: once a lead is ruled out, that is the fact you
      need from across the list, even if an application already went out. */
-  .row.rejected { opacity:1; border-color:#5d2f2f; background:#1e1213; border-left:3px solid #d96b6b; }
-  .row.rejected:hover { border-color:#7a3d3d; border-left-color:#d96b6b; }
-  .row.rejected .out, .row.rejected .mark { border-left-color:#3a2224; }
-  .row.rejected .snippet { color:#e0a8a8; }
-  .row.rejected .mark button { color:#8a6a6a; }
-  .row .mark { flex:0 0 auto; display:flex; margin:0; border-left:1px solid #1b1b22; }
-  .row .mark button { background:none; border:0; color:#6f6f7b; font:inherit; cursor:pointer; padding:0 14px; }
-  .row .mark button:hover { color:#5cd58c; }
-  .row.applied .mark button { color:#5cd58c; }
-  .row.applied .mark button:hover { color:#d98b8b; }
-  .row .main { flex:1 1 auto; min-width:0; padding:12px 14px; color:inherit; display:block; }
+  .row.rejected { opacity:1; background:color-mix(in srgb, var(--bad) 7%, transparent); box-shadow:inset 3px 0 var(--bad); }
+  .row.rejected .snippet { color:color-mix(in srgb, var(--bad) 60%, var(--text)); }
+  .row .main { flex:1 1 auto; min-width:0; padding:12px 0; color:inherit; display:block; }
   .row .main:hover { text-decoration:none; }
-  .row .out { flex:0 0 auto; display:flex; align-items:center; padding:0 16px; color:#7db5ff; border-left:1px solid #1b1b22; white-space:nowrap; }
   .row .top { display:flex; justify-content:space-between; flex-wrap:wrap; gap:2px 12px; }
   .row .who { font-weight:600; word-break:break-word; }
-  .row .meta { color:#8b8b96; }
-  .score { color:#101014; background:#d9a441; border-radius:4px; padding:0 7px; font-weight:600; font-size:12px; vertical-align:middle; margin-right:6px; }
-  .tag.new { color:#101014; background:#5cd58c; }
-  .tag.draft { color:#101014; background:#7db5ff; }
-  .tag.applied { color:#101014; background:#5cd58c; }
-  .tag.rejected { color:#101014; background:#d96b6b; }
-  /* Approved means the gate is cleared but nothing has gone out, so it reads as
-     pending rather than done: amber, the colour the score badge already uses.
-     Prepped is quieter still — an artifact waiting to be read is not a state
-     anyone acts on from the list. */
-  .tag.approved { color:#101014; background:#d9a441; }
-  .tag.prepped { color:#8b8b96; background:none; border:1px solid #3a3a46; }
-  /* A repeat is bookkeeping, not news: outlined and quiet, so it never
-     competes with new/applied/rejected for attention. */
-  .tag.dup { color:#8b8b96; background:none; border:1px solid #3a3a46; }
-  /* Whose lead this is. Violet keeps it distinct from every status colour —
-     it answers a different question than new/applied/rejected do. */
-  .tag.who-tag { color:#101014; background:#b48ce8; }
-  .row.dup { opacity:.6; }
-  .row.dup .score { background:#4a4a52; color:#c9c9d2; }
+  .row.dup .score { background:var(--tertiary); color:var(--hint); }
+  .meta { color:var(--hint); font-size:13px; margin-top:2px; }
+  .meta .tag { margin:0 2px 0 0; }
+  .snippet { word-break:break-word; margin-top:2px; }
+  .row .out { flex:0 0 auto; font-size:13px; font-weight:600; white-space:nowrap; padding:8px 6px; }
+  .row .mark { flex:0 0 auto; display:flex; margin:0; }
+  .row .mark button { border:0; cursor:pointer; width:34px; height:34px; border-radius:50%; font-size:15px;
+                      background:var(--tertiary); color:var(--hint); }
+  .row .mark button:hover { color:var(--ok); }
+  .row.applied .mark button { background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  .row.applied .mark button:hover { color:var(--bad); }
   /* Both chips are always in the DOM; the row's class picks which one shows.
      That lets the async toggle restyle the whole row by flipping one class. */
   .row:not(.applied) .tag.applied { display:none; }
   .row.applied .tag.new { display:none; }
-  .snippet { color:#b9b9c4; word-break:break-word; margin-top:2px; }
+  .empty { padding:14px 16px; margin:0; }
   @media (max-width: 480px) {
-    body { padding:12px; font-size:13px; }
-    .row .main { padding:10px; }
-    .row .out { padding:0 12px; }
-    .row .mark button { padding:0 10px; }
-    .tiles { grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); }
-    .tile { padding:8px 10px; }
-    .tile .n { font-size:16px; }
+    main { padding:12px 10px 48px; }
+    .row { padding-left:12px; }
   }
 </style>
 <main>
-  <h1>💼 jobs</h1>
-  <div class="sub">{{.Sub}}</div>
+  <div class="top-bar">
+    <div><h1>Jobs</h1><div class="sub">{{.Sub}}</div></div>
+    ` + themeSeg + `
+  </div>
   {{range .Chips}}
   <div class="chips"><span class="g">{{.Name}}</span>
     {{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{if .On}}✓ {{end}}{{.Label}}</a>{{end}}
@@ -1327,28 +1307,31 @@ const jobsBoardHTML = `<!doctype html>
   {{end}}
   {{with .Dash}}
   <div class="tiles">
-    <div class="tile"><div class="n">{{.Total}}</div><div class="k">leads</div></div>
-    <div class="tile"><div class="n">{{.Roles}}</div><div class="k">roles{{if .Duplicates}} · {{.Duplicates}} repeat{{if gt .Duplicates 1}}s{{end}}{{end}}</div></div>
-    <div class="tile"><div class="n">{{.Unviewed}}</div><div class="k">not viewed</div></div>
-    <div class="tile"><div class="n">{{.ToReview}}</div><div class="k">to review</div></div>
-    <div class="tile"><div class="n">{{.ToSend}}</div><div class="k">to send</div></div>
-    <div class="tile"><div class="n">{{.Applied}}</div><div class="k">applied</div></div>
-    <div class="tile"><div class="n">{{.Rejected}}</div><div class="k">rejected</div></div>
-    <div class="tile"><div class="n">{{.Last24h}}</div><div class="k">last 24h</div></div>
-    <div class="tile"><div class="n">{{.ViewedPct}}%</div><div class="k">worked through</div></div>
+    <div class="card tile"><div class="n">{{.Total}}</div><div class="k">leads</div></div>
+    <div class="card tile"><div class="n">{{.Roles}}</div><div class="k">roles{{if .Duplicates}} · {{.Duplicates}} repeat{{if gt .Duplicates 1}}s{{end}}{{end}}</div></div>
+    <div class="card tile"><div class="n">{{.Unviewed}}</div><div class="k">not viewed</div></div>
+    <div class="card tile"><div class="n">{{.ToReview}}</div><div class="k">to review</div></div>
+    <div class="card tile"><div class="n">{{.ToSend}}</div><div class="k">to send</div></div>
+    <div class="card tile"><div class="n">{{.Applied}}</div><div class="k">applied</div></div>
+    <div class="card tile"><div class="n">{{.Rejected}}</div><div class="k">rejected</div></div>
+    <div class="card tile"><div class="n">{{.Last24h}}</div><div class="k">last 24h</div></div>
+    <div class="card tile"><div class="n">{{.ViewedPct}}%</div><div class="k">worked through</div></div>
   </div>
-  <div class="chart">
-    {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
+  <div class="card panel">
+    <div class="chart">
+      {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
+    </div>
+    <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
   </div>
-  <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
   ` + chartTip + `
   <div class="grid">
-    {{if gt (len .Profiles) 1}}<div class="card"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Networks}}<div class="card"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Types}}<div class="card"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Subreddits}}<div class="card"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
   </div>
   {{end}}
+  <div class="card list">
   {{range .Rows}}
   <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .DupOf}} dup{{end}}">
     <a class="main" href="{{.ShowLink}}">
@@ -1366,129 +1349,291 @@ const jobsBoardHTML = `<!doctype html>
     <form class="mark" method="post" action="{{.MarkLink}}" data-state="applied" data-mark="✓" data-undo="↩"><button type="submit" title="{{.MarkLabel}}">{{if .Applied}}↩{{else}}✓{{end}}</button></form>
   </div>
   {{else}}
-  <p class="sub">no leads under this filter</p>
+  <p class="sub empty">no leads under this filter</p>
   {{end}}
+  </div>
 </main>
-` + markJS
+` + themeJS + markJS
+
+// gateJS drives the approve composer: one pill, one round button. Idle with an
+// empty note the button is a mic and starts the Telegram-style recording UI;
+// with text (or a recording running) it is a send button that approves. The
+// recording itself is a preview — levels are drawn from the real microphone
+// when permission is granted (simulated otherwise), but no audio is kept or
+// uploaded. Sending while recording approves with the note left untouched.
+//
+// Without JavaScript the form still posts notes + approve and redirects, the
+// same fallback every other toggle on these pages has.
+const gateJS = `<script>
+(function () {
+  var f = document.getElementById('gate')
+  if (!f) return
+  var main = document.querySelector('main')
+  var input = f.querySelector('input[name=notes]')
+  var send = f.querySelector('.send')
+  var wave = f.querySelector('.rec-wave')
+  var timeEl = f.querySelector('.rec-time')
+  var state = 'idle', ms = 0, levels = [], last = 0.4, tick = null, stream = null, actx = null, an = null
+
+  function face () { f.classList.toggle('txt', state !== 'idle' || !!input.value.trim()) }
+  input.addEventListener('input', face); face()
+
+  function fmt (ms) {
+    var t = Math.floor(ms / 100), d = t % 10, s = Math.floor(t / 10) % 60, m = Math.floor(t / 600)
+    return m + ':' + String(s).padStart(2, '0') + ',' + d
+  }
+  function level () {
+    if (an) {
+      var d = new Uint8Array(an.frequencyBinCount)
+      an.getByteFrequencyData(d)
+      var s = 0; for (var i = 0; i < d.length; i++) s += d[i]
+      return Math.min(1, (s / d.length) / 80)
+    }
+    last = Math.max(0.08, Math.min(1, last + (Math.random() - 0.5) * 0.35))
+    return last
+  }
+  function draw () {
+    var r = wave.getBoundingClientRect(), dpr = window.devicePixelRatio || 1
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr))
+    if (wave.width !== w) { wave.width = w; wave.height = h }
+    var ctx = wave.getContext('2d')
+    ctx.clearRect(0, 0, w, h)
+    var bw = 2 * dpr, gap = 2 * dpr, n = Math.floor(w / (bw + gap))
+    var ls = levels.slice(-n)
+    ctx.fillStyle = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#2990FF').trim()
+    ls.forEach(function (v, i) {
+      var bh = Math.max(3 * dpr, v * h), x = i * (bw + gap), y = (h - bh) / 2
+      ctx.beginPath()
+      if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, bw / 2); else ctx.rect(x, y, bw, bh)
+      ctx.fill()
+    })
+  }
+  function start () {
+    state = 'rec'; ms = 0; levels = []
+    f.classList.add('rec'); f.classList.remove('paused'); face()
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (st) {
+        if (state === 'idle') { st.getTracks().forEach(function (t) { t.stop() }); return }
+        stream = st
+        try {
+          actx = new (window.AudioContext || window.webkitAudioContext)()
+          var src = actx.createMediaStreamSource(st)
+          an = actx.createAnalyser(); an.fftSize = 256
+          src.connect(an)
+        } catch (e) {}
+      }).catch(function () {})
+    }
+    tick = setInterval(function () {
+      if (state !== 'rec') return
+      levels.push(level()); ms += 100
+      timeEl.textContent = fmt(ms)
+      draw()
+    }, 100)
+  }
+  function stopAll () {
+    clearInterval(tick); tick = null
+    if (stream) stream.getTracks().forEach(function (t) { t.stop() })
+    if (actx) { try { actx.close() } catch (e) {} }
+    stream = actx = an = null
+  }
+  function discard () {
+    stopAll(); state = 'idle'
+    f.classList.remove('rec', 'paused')
+    timeEl.textContent = '0:00,0'
+    face()
+  }
+  f.querySelector('.gc-trash').addEventListener('click', discard)
+  f.querySelector('.rec-pause').addEventListener('click', function () {
+    if (state === 'rec') { state = 'paused'; f.classList.add('paused') }
+    else if (state === 'paused') { state = 'rec'; f.classList.remove('paused') }
+  })
+  function doSend (voice) {
+    var note = input.value.trim()
+    send.disabled = true
+    fetch(f.action, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: voice ? null : new URLSearchParams({ notes: note })
+    })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() })
+      .then(function (d) {
+        if (voice) discard()
+        else document.querySelector('.gate-note').textContent = note
+        document.querySelector('.gd-when').textContent = 'approved just now'
+        main.classList.toggle('approved', d.on)
+      })
+      .catch(function () {})
+      .then(function () { send.disabled = false })
+  }
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); doSend(false) }
+  })
+  f.addEventListener('submit', function (e) {
+    e.preventDefault()
+    if (state === 'idle' && !input.value.trim()) { start(); return }
+    doSend(state !== 'idle')
+  })
+})()
+</script>`
 
 const jobShowHTML = `<!doctype html>
 ` + pageHead + `
 <title>{{.J.Author}} · jobs</title>
 <style>` + sharedCSS + `
-  .back { display:inline-block; margin-bottom:16px; color:#8b8b96; }
-  h1 { font-size:16px; }
-  .meta { color:#8b8b96; margin-bottom:16px; }
-  .score { color:#101014; background:#d9a441; border-radius:4px; padding:0 7px; font-weight:600; font-size:13px; margin-right:6px; }
+  .back { font-size:17px; font-weight:600; }
+  .head { padding:16px; }
+  h1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:20px; line-height:24px; font-weight:700; margin:0; }
+  h1 .score { font-size:15px; border-radius:8px; padding:2px 9px; margin:0; }
   /* One status chip, picked by the classes on <main> so the async toggles
      (applied, approved) move it without a reload. Priority: ruled out beats
      applied, applied beats approved, approved beats needing review. */
-  .status { margin:2px 0 10px; }
-  .st { display:none; border-radius:6px; padding:3px 12px; font-weight:600; font-size:13px; }
-  main.rejected .st-rejected { display:inline-block; color:#101014; background:#d96b6b; }
-  main:not(.rejected).applied .st-applied { display:inline-block; color:#101014; background:#5cd58c; }
-  main:not(.rejected):not(.applied).approved .st-approved { display:inline-block; color:#101014; background:#d9a441; }
-  main:not(.rejected):not(.applied):not(.approved).prepped .st-review { display:inline-block; color:#e8e8ec; background:#3b6ea5; }
-  main:not(.rejected):not(.applied):not(.approved):not(.prepped) .st-none { display:inline-block; color:#8b8b96; background:#2a2a33; }
-  .box.rejected { border-color:#5d2f2f; background:#1e1213; }
-  .box.rejected h3 { color:#d96b6b; }
-  .box.rejected .body { color:#e0a8a8; }
-  .mark { display:inline; }
-  .mark button { border:1px solid #2f5d43; border-radius:8px; background:none; color:#5cd58c; padding:8px 16px; font:inherit; cursor:pointer; margin:4px 12px 16px 0; }
-  .mark button:hover { background:#122019; }
-  .mark.on button { border-color:#4a3340; color:#d98b8b; }
-  /* The approve toggle wears the approval colour in the same top row. */
-  .mark.gate-toggle button { border-color:#6b5320; color:#d9a441; font-weight:600; }
-  .mark.gate-toggle button:hover { background:#221c10; }
-  .mark.gate-toggle.on button { border-color:#4a3340; color:#d98b8b; font-weight:400; }
-  .box { border:1px solid #2a2a33; border-radius:8px; padding:12px 14px; margin-bottom:14px; }
-  .box h3 { font-size:11px; font-weight:600; color:#8b8b96; letter-spacing:.08em; text-transform:uppercase; margin:0 0 7px; }
-  .body { white-space:pre-wrap; word-break:break-word; color:#d5d5dc; }
-  .draft { white-space:pre-wrap; word-break:break-word; color:#e8e8ec; }
-  .go { display:inline-block; border:1px solid #3b6ea5; border-radius:8px; padding:8px 16px; margin:4px 12px 16px 0; font-weight:600; }
-  .copy { border:1px solid #2a2a33; border-radius:8px; background:none; color:#8b8b96; padding:8px 16px; font:inherit; cursor:pointer; }
-  .copy:hover { border-color:#3a3a46; color:#e8e8ec; }
-  .sig { display:inline-block; border:1px solid #2a2a33; border-radius:999px; padding:0 9px; color:#8b8b96; margin:0 4px 4px 0; font-size:12px; }
-  a.mail { word-break:break-all; }
-  .tag.approved { color:#101014; background:#d9a441; }
-  /* The review block is the reason this page exists once prep has run, so it
-     sits above the raw post and is boxed in the approval colour. */
-  .review { border-color:#4a3f22; }
-  .review h3 { color:#d9a441; }
-  .qs { margin:0; padding-left:18px; color:#d5d5dc; }
+  .st { display:none; margin-left:auto; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
+  main.rejected .st-rejected { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  main:not(.rejected).applied .st-applied { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  main:not(.rejected):not(.applied).approved .st-approved { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  main:not(.rejected):not(.applied):not(.approved).prepped .st-review { display:inline-block; background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  main:not(.rejected):not(.applied):not(.approved):not(.prepped) .st-none { display:inline-block; background:var(--tertiary); color:var(--hint); }
+  .meta { color:var(--hint); font-size:13px; line-height:20px; margin-top:8px; }
+  .meta .tag { margin:0 2px 0 0; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .btn { display:inline-block; border:0; cursor:pointer; font-size:15px; font-weight:600; border-radius:10px; padding:9px 14px;
+         background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); }
+  a.btn:hover { text-decoration:none; opacity:.85; }
+  .btn.ok { background:color-mix(in srgb, var(--ok) 13%, transparent); color:var(--ok); }
+  .mark { display:inline; margin:0; }
+  /* Section label outside, content card under it — the Telegram list shape. */
+  .sec { color:var(--hint); font-size:13px; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin:24px 16px 8px; }
+  .box { padding:14px 16px; }
+  .body { white-space:pre-wrap; word-break:break-word; }
+  .fit { color:var(--hint); margin-top:8px; }
+  .box.bad { background:color-mix(in srgb, var(--bad) 8%, var(--section)); }
+  .qs { margin:0; padding-left:18px; }
   .qs li { margin-bottom:5px; }
-  .blockers { color:#e0a8a8; }
-  /* One question per row: the draft answer is the thing being reviewed, so it
-     gets the readable colour and the question above it is just the label. */
-  .fq { margin-bottom:11px; }
-  .fq:last-child { margin-bottom:0; }
-  .fq-q { color:#8b8b96; font-size:12px; margin-bottom:3px; }
-  .fq-a { white-space:pre-wrap; word-break:break-word; color:#e8e8ec; border-left:2px solid #4a3f22; padding-left:9px; }
-  .fq-formal { color:#6b6b76; font-size:12px; font-style:italic; }
-  .notes textarea { width:100%; box-sizing:border-box; min-height:80px; background:#16161c; color:#e8e8ec; border:1px solid #2a2a33; border-radius:8px; padding:9px 11px; font:inherit; resize:vertical; }
-  .gate-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:9px; }
-  .notes button { border:1px solid #2a2a33; border-radius:8px; background:none; color:#8b8b96; padding:8px 16px; font:inherit; cursor:pointer; }
-  .notes button:hover { border-color:#3a3a46; color:#e8e8ec; }
-  .notes button.primary { border-color:#6b5320; color:#d9a441; font-weight:600; }
-  .notes button.primary:hover { background:#221c10; border-color:#8a6b2a; color:#e8b954; }
-  .saved { color:#5cd58c; text-transform:none; letter-spacing:0; margin-left:8px; }
-  .box.gate h3 { color:#d9a441; }
-  @media (max-width: 480px) { body { padding:12px; font-size:13px; } }
+  .qs li:last-child { margin-bottom:0; }
+  .blockers { color:color-mix(in srgb, var(--bad) 60%, var(--text)); }
+  /* One question per row: the draft answer is the thing being reviewed, so the
+     question above it is just the label. */
+  .fq { padding:12px 0; border-bottom:1px solid var(--divider); }
+  .fq:first-child { padding-top:0; }
+  .fq:last-child { border-bottom:0; padding-bottom:0; }
+  .fq-q { color:var(--hint); font-size:13px; line-height:18px; }
+  .fq-a { white-space:pre-wrap; word-break:break-word; margin-top:2px; }
+  .fq-formal { color:var(--hint); font-size:13px; font-style:italic; margin-top:2px; }
+  .sigs { display:flex; gap:8px; flex-wrap:wrap; }
+  .sig { background:var(--tertiary); color:var(--hint); font-size:13px; border-radius:999px; padding:3px 12px; }
+  a.mail { word-break:break-all; }
+  .copy { border:0; border-radius:10px; background:var(--tertiary); color:var(--hint); padding:9px 14px; font:inherit; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
+  .copy:hover { color:var(--text); }
+  /* The approve composer. main.approved swaps it for the approved card, so the
+     async approve/withdraw round-trip is one class flip. */
+  main.approved .gate-compose { display:none; }
+  main:not(.approved) .gate-done { display:none; }
+  .gate-compose { display:block; padding:12px; }
+  .gc-hint { color:var(--hint); font-size:13px; line-height:20px; padding:0 6px 10px; }
+  .gc-row { display:flex; align-items:center; gap:8px; }
+  .gc-trash { display:none; background:none; border:0; color:var(--bad); font-size:20px; line-height:1; cursor:pointer; padding:8px; flex:0 0 auto; }
+  .pill { flex:1; display:flex; align-items:center; gap:10px; background:var(--input); border-radius:999px; height:46px; padding:0 14px; min-width:0; }
+  .pill input { flex:1; background:none; border:0; outline:none; color:var(--text); font:inherit; font-size:15px; min-width:0; }
+  .pill input::placeholder { color:var(--hint); }
+  .rec-dot { display:none; width:9px; height:9px; border-radius:50%; background:var(--bad); animation:jhPulse 1.2s ease-in-out infinite; flex:0 0 auto; }
+  .rec-wave { display:none; flex:1; height:26px; min-width:0; }
+  .rec-time { display:none; font-size:15px; font-variant-numeric:tabular-nums; flex:0 0 auto; }
+  .rec-pause { display:none; background:none; border:0; cursor:pointer; padding:4px; align-items:center; gap:3px; flex:0 0 auto; }
+  .rec-pause i { width:3px; height:13px; border-radius:2px; background:var(--hint); display:block; }
+  .rec-pause .tri { display:none; width:0; height:0; border-left:11px solid var(--hint); border-top:7px solid transparent; border-bottom:7px solid transparent; }
+  .gate-compose.rec .pill input { display:none; }
+  .gate-compose.rec .rec-dot { display:block; }
+  .gate-compose.rec .rec-wave { display:block; }
+  .gate-compose.rec .rec-time { display:inline; }
+  .gate-compose.rec .rec-pause { display:flex; }
+  .gate-compose.rec .gc-trash { display:block; }
+  .gate-compose.paused .rec-dot { animation:none; opacity:.4; }
+  .gate-compose.paused .rec-pause i { display:none; }
+  .gate-compose.paused .rec-pause .tri { display:block; }
+  .send { width:46px; height:46px; border-radius:50%; background:var(--accent); border:0; cursor:pointer; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .send[disabled] { opacity:.6; cursor:default; }
+  .send svg { width:24px; height:24px; display:block; fill:#FFFFFF; }
+  .send .fly { display:none; width:0; height:0; border-left:16px solid #FFFFFF; border-top:9px solid transparent; border-bottom:9px solid transparent; margin-left:4px; }
+  .gate-compose.txt .send .mic, .gate-compose.rec .send .mic { display:none; }
+  .gate-compose.txt .send .fly, .gate-compose.rec .send .fly { display:block; }
+  @keyframes jhPulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation:none } }
+  .gate-done { padding:14px 16px; }
+  .ok-pill { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); font-size:15px; font-weight:600; border-radius:999px; padding:5px 14px; }
+  .gd-when { color:var(--hint); font-size:13px; margin-left:8px; }
+  .gate-note { background:var(--input); border-radius:12px; padding:10px 14px; margin-top:12px; white-space:pre-wrap; word-break:break-word; }
+  .gate-note:empty { display:none; }
+  .withdraw { background:none; border:0; color:var(--bad); font-size:13px; cursor:pointer; padding:0; margin-top:12px; }
+  @media (max-width: 480px) { main { padding:12px 10px 48px; } }
 </style>
 <main class="{{if .Applied}}applied {{end}}{{if .Approved}}approved {{end}}{{if .J.Rejected}}rejected {{end}}{{if .Prep}}prepped{{end}}">
-  <a class="back" href="{{.BackTo}}">← all jobs</a>
-  <h1><span class="score">{{printf "%.1f" .J.Score}}</span>{{.J.Author}}</h1>
-  <div class="status">
-    <span class="st st-rejected">rejected</span>
-    <span class="st st-applied">applied</span>
-    <span class="st st-approved">approved · ready to apply</span>
-    <span class="st st-review">prepped · needs your review</span>
-    <span class="st st-none">not reviewed yet</span>
+  <div class="top-bar">
+    <a class="back" href="{{.BackTo}}">‹ Jobs</a>
+    ` + themeSeg + `
   </div>
-  {{if .J.Rejected}}<div class="box rejected"><h3>ruled out {{ts .J.RejectedAt}} UTC</h3><div class="body">{{.J.RejectReason}}</div></div>{{end}}
-  {{if .DupOf}}<div class="box"><h3>repeat</h3><div class="body">Same role as <a href="{{.DupLink}}">lead #{{.DupOf}}</a>. Work that one.</div></div>{{end}}
-  {{if .Repeats}}<div class="box"><h3>also posted as</h3>{{range .Repeats}}<div><a href="{{.Link}}">#{{.ID}} · {{.Label}}</a></div>{{end}}</div>{{end}}
-  <div class="meta">{{with .J.Profile}}{{.}} · {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{ts .ViewedAt}} UTC{{end}}{{if .Applied}} · applied {{ts .AppliedAt}} UTC{{end}}{{if .Approved}} · approved {{ts .ApprovedAt}} UTC{{end}}</div>
-  <a class="go" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
-  {{if .HasPostingURL}}<a class="go" href="{{.PostingURL}}" target="_blank" rel="noopener">the real posting ↗</a>{{end}}
-  <form class="mark{{if .Applied}} on{{end}}" method="post" action="{{.MarkLink}}" data-state="applied" data-mark="mark as applied" data-undo="undo"><button type="submit">{{.MarkLabel}}</button></form>
-  <form class="mark gate-toggle{{if .Approved}} on{{end}}" method="post" action="{{.ApproveLink}}" data-state="approved" data-mark="approve for applying" data-undo="withdraw approval" data-carry=".notes textarea"><button type="submit">{{if .Approved}}withdraw approval{{else}}approve for applying{{end}}</button></form>
+  <div class="card head">
+    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></h1>
+    <div class="meta">{{with .J.Profile}}<span class="tag who-tag">{{.}}</span> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{ts .ViewedAt}} UTC{{end}}{{if .Applied}} · applied {{ts .AppliedAt}} UTC{{end}}{{if .Approved}} · approved {{ts .ApprovedAt}} UTC{{end}}</div>
+    <div class="actions">
+      <a class="btn" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
+      {{if .HasPostingURL}}<a class="btn" href="{{.PostingURL}}" target="_blank" rel="noopener">the real posting ↗</a>{{end}}
+      {{if .Prep}}{{if .Prep.CVURL}}<a class="btn" href="{{.Prep.CVURL}}" target="_blank" rel="noopener">{{if .Prep.CVLabel}}{{.Prep.CVLabel}}{{else}}tailored CV{{end}} ↗</a>{{end}}{{end}}
+      <form class="mark{{if .Applied}} on{{end}}" method="post" action="{{.MarkLink}}" data-state="applied" data-mark="mark as applied" data-undo="undo applied"><button type="submit" class="btn ok">{{.MarkLabel}}</button></form>
+    </div>
+  </div>
+  {{if .J.Rejected}}<div class="sec">ruled out {{ts .J.RejectedAt}} UTC</div><div class="card box bad"><div class="body">{{.J.RejectReason}}</div></div>{{end}}
+  {{if .DupOf}}<div class="sec">repeat</div><div class="card box"><div class="body">Same role as <a href="{{.DupLink}}">lead #{{.DupOf}}</a>. Work that one.</div></div>{{end}}
+  {{if .Repeats}}<div class="sec">also posted as</div><div class="card box">{{range .Repeats}}<div><a href="{{.Link}}">#{{.ID}} · {{.Label}}</a></div>{{end}}</div>{{end}}
+  {{/* The review gate: one composer, one send. Sending approves; the note in
+       the pill rides along (empty is fine). The mic face starts the voice-note
+       preview — the recording UI is real, the audio is not kept yet. */}}
+  <div class="sec">approve for applying</div>
+  <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}">
+    <div class="gc-hint">Sending approves this lead for the AI apply stage. The note is optional — type it, or record it (voice is a preview and is not saved yet).</div>
+    <div class="gc-row">
+      <button type="button" class="gc-trash" title="delete recording">✕</button>
+      <div class="pill">
+        <input name="notes" value="{{.ReviewNotes}}" placeholder="note for the AI apply stage (optional)" autocomplete="off">
+        <span class="rec-dot"></span>
+        <canvas class="rec-wave"></canvas>
+        <span class="rec-time">0:00,0</span>
+        <button type="button" class="rec-pause" title="pause / resume"><i></i><i></i><span class="tri"></span></button>
+      </div>
+      <button type="submit" class="send" title="approve for applying">
+        <svg class="mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 1 0-7 0v6a3.5 3.5 0 0 0 3.5 3.5z"></path><path d="M18.5 12a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.44V20.5a.9.9 0 0 0 1.8 0v-2.06A6.5 6.5 0 0 0 18.5 12z"></path></svg>
+        <span class="fly"></span>
+      </button>
+    </div>
+  </form>
+  <div class="card gate-done">
+    <div><span class="ok-pill">✓ approved · ready to apply</span><span class="gd-when">{{if .Approved}}approved {{ts .ApprovedAt}} UTC{{end}}</span></div>
+    <div class="gate-note">{{.ReviewNotes}}</div>
+    <form class="mark" method="post" action="{{.ApproveLink}}" data-state="approved" data-mark="withdraw approval" data-undo="withdraw approval"><button type="submit" class="withdraw">withdraw approval</button></form>
+  </div>
   {{with .Prep}}
-  <div class="box review"><h3>summary</h3><div class="body">{{.Summary}}</div>
-    {{with .Fit}}<div class="body" style="margin-top:9px;color:#8b8b96">{{.}}</div>{{end}}</div>
-  {{if .Blockers}}<div class="box review"><h3>blockers</h3><ul class="qs blockers">{{range .Blockers}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
-  {{if .OpenQuestions}}<div class="box review"><h3>needs your decision</h3><ul class="qs">{{range .OpenQuestions}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
-  {{if .FormQuestions}}<div class="box review"><h3>what the form asks</h3>
+  <div class="sec">summary</div>
+  <div class="card box"><div class="body">{{.Summary}}</div>{{with .Fit}}<div class="body fit">{{.}}</div>{{end}}</div>
+  {{if .Blockers}}<div class="sec">blockers</div><div class="card box"><ul class="qs blockers">{{range .Blockers}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+  {{if .OpenQuestions}}<div class="sec">needs your decision</div><div class="card box"><ul class="qs">{{range .OpenQuestions}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+  {{if .FormQuestions}}<div class="sec">what the form asks</div><div class="card box">
     {{range .FormQuestions}}<div class="fq">
       <div class="fq-q">{{.Question}}</div>
       {{if .Answer}}<div class="fq-a">{{.Answer}}</div>
       {{else}}<div class="fq-formal">{{if .Source}}{{.Source}}{{else}}filled from the persona{{end}}</div>{{end}}
     </div>{{end}}
   </div>{{end}}
-  {{if .CVURL}}<a class="go" href="{{.CVURL}}" target="_blank" rel="noopener">{{if .CVLabel}}{{.CVLabel}}{{else}}tailored CV{{end}} ↗</a>{{end}}
   {{end}}
-  {{if .PrepRaw}}{{if not .Prep}}<div class="box rejected"><h3>prep unreadable</h3><div class="body">The prep artifact on this lead is not valid JSON, so it could not be rendered. Re-run the prep stage for it.</div></div>{{end}}{{end}}
-  {{/* The lead carries one note, and this box is both its display and its
-       editor: the textarea always holds the saved text, saving overwrites it,
-       and the ?noted=1 flag from the save redirect is the "it stuck"
-       confirmation the box was missing. */}}
-  <form class="notes" method="post" action="{{.NotesLink}}">
-    <div class="box review gate">
-      <h3>note for the AI apply stage{{if .Noted}} <span class="saved">✓ saved</span>{{end}}</h3>
-      <textarea name="notes" placeholder="one note, editable — a correction, a caveat, an answer to a question above">{{.ReviewNotes}}</textarea>
-      <div class="gate-row">
-        <button type="submit" class="primary">{{if .ReviewNotes}}update note for AI{{else}}save note for AI{{end}}</button>
-      </div>
-    </div>
-  </form>
-  {{if .J.Title}}<div class="box"><h3>title</h3><div class="body">{{.J.Title}}</div></div>{{end}}
-  {{if .J.ScoreReason}}<div class="box"><h3>why this score</h3><div class="body">{{.J.ScoreReason}}</div></div>{{end}}
-  {{if .J.Body}}<div class="box"><h3>post</h3><div class="body">{{.J.Body}}</div></div>{{end}}
-  {{if .J.PostingText}}<div class="box"><h3>the real posting</h3><div class="body">{{.J.PostingText}}</div></div>{{end}}
-  {{if .Emails}}<div class="box"><h3>contacts</h3>{{range .Emails}}<div><a class="mail" href="mailto:{{.}}">{{.}}</a></div>{{end}}</div>{{end}}
+  {{if .PrepRaw}}{{if not .Prep}}<div class="sec">prep unreadable</div><div class="card box bad"><div class="body">The prep artifact on this lead is not valid JSON, so it could not be rendered. Re-run the prep stage for it.</div></div>{{end}}{{end}}
+  {{if .J.Title}}<div class="sec">title</div><div class="card box"><div class="body">{{.J.Title}}</div></div>{{end}}
+  {{if .J.ScoreReason}}<div class="sec">why this score</div><div class="card box"><div class="body">{{.J.ScoreReason}}</div></div>{{end}}
+  {{if .J.Body}}<div class="sec">post</div><div class="card box"><div class="body">{{.J.Body}}</div></div>{{end}}
+  {{if .J.PostingText}}<div class="sec">the real posting</div><div class="card box"><div class="body">{{.J.PostingText}}</div></div>{{end}}
+  {{if .Emails}}<div class="sec">contacts</div><div class="card box">{{range .Emails}}<div><a class="mail" href="mailto:{{.}}">{{.}}</a></div>{{end}}</div>{{end}}
   {{if .J.Draft}}
-  <div class="box"><h3>message draft</h3><div class="draft" id="draft">{{.J.Draft}}</div></div>
+  <div class="sec">message draft</div>
+  <div class="card box"><div class="body" id="draft">{{.J.Draft}}</div></div>
   <button class="copy" onclick="navigator.clipboard.writeText(document.getElementById('draft').innerText).then(()=>{this.textContent='copied ✓'})">copy draft</button>
   {{end}}
-  {{if .Signals}}<div class="box"><h3>signals</h3>{{range .Signals}}<span class="sig">{{.}}</span>{{end}}</div>{{end}}
+  {{if .Signals}}<div class="sec">signals</div><div class="card box sigs">{{range .Signals}}<span class="sig">{{.}}</span>{{end}}</div>{{end}}
 </main>
-` + markJS
+` + themeJS + markJS + gateJS

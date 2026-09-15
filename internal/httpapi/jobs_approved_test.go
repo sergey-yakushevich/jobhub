@@ -401,9 +401,9 @@ func TestBoardFiltersByPipelineState(t *testing.T) {
 	}
 }
 
-// The note box is the lead's one editable note: saving redirects back with the
-// ?noted=1 confirmation, the textarea holds what was saved, and the button
-// reads "update" once a note exists.
+// The composer pill is the lead's one editable note: a note saved through the
+// API-side /notes endpoint prefills the pill (and the approved card), so the
+// next send carries it forward instead of silently blanking it.
 func TestNoteSaveConfirmsAndPrefillsForEditing(t *testing.T) {
 	s, _ := testServer(t)
 	ingestJobs(t, s)
@@ -411,8 +411,8 @@ func TestNoteSaveConfirmsAndPrefillsForEditing(t *testing.T) {
 	key := s.LinkKey(jobScope(id))
 
 	body := getJobPage(t, s, id)
-	if !strings.Contains(body, "save note for AI") {
-		t.Error("a lead without a note should offer to save one")
+	if !strings.Contains(body, "note for the AI apply stage (optional)") {
+		t.Error("a lead without a note should offer the composer placeholder")
 	}
 
 	req := httptest.NewRequest("POST", "/jobs/"+itoa(id)+"/notes?k="+key,
@@ -423,23 +423,15 @@ func TestNoteSaveConfirmsAndPrefillsForEditing(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("save note: %d", rec.Code)
 	}
-	back := rec.Header().Get("Location")
-	if !strings.Contains(back, "noted=1") {
-		t.Fatalf("save redirect %q carries no noted flag", back)
-	}
 
-	req = httptest.NewRequest("GET", back, nil)
+	req = httptest.NewRequest("GET", rec.Header().Get("Location"), nil)
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
-	body = rec.Body.String()
-	for _, want := range []string{"✓ saved", "ask about equity", "update note for AI"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page after saving a note is missing %q", want)
-		}
+	if !strings.Contains(rec.Body.String(), `value="ask about equity"`) {
+		t.Error("saved note does not prefill the composer pill")
 	}
-	// The flag is one-shot: a plain reload shows the note without the badge.
-	if body := getJobPage(t, s, id); strings.Contains(body, "✓ saved") ||
-		!strings.Contains(body, "ask about equity") {
-		t.Error("the saved badge should be gone on reload, the note should not be")
+	// And it survives a plain reload.
+	if !strings.Contains(getJobPage(t, s, id), `value="ask about equity"`) {
+		t.Error("the note should still prefill the composer on reload")
 	}
 }

@@ -108,23 +108,35 @@ func networkEmoji(net string) string {
 // because the pages sit at several depths under the /trk mount, so a relative
 // href would resolve to a different place on each of them. Every template's
 // data therefore carries Base.
+//
+// The inline script runs before the stylesheet so the saved theme lands on
+// <html> before first paint — without it a light-theme reader gets a dark
+// flash on every navigation.
 const pageHead = `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <link rel="icon" type="image/svg+xml" href="{{.Base}}/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="{{.Base}}/favicon.png">
-<link rel="apple-touch-icon" href="{{.Base}}/apple-touch-icon.png">`
+<link rel="apple-touch-icon" href="{{.Base}}/apple-touch-icon.png">
+<script>(function(){var t='dark';try{t=localStorage.getItem('jobhub-theme')||t}catch(e){}document.documentElement.dataset.theme=t})()</script>`
+
+// themeSeg is the Light/Dark segmented control. The active face is pure CSS
+// keyed off <html data-theme>, so the buttons never need re-rendering.
+const themeSeg = `<div class="seg"><button type="button" class="t-light" onclick="jhTheme('light')">Light</button><button type="button" class="t-dark" onclick="jhTheme('dark')">Dark</button></div>`
+
+const themeJS = `<script>function jhTheme(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('jobhub-theme',t)}catch(e){}}</script>`
 
 // chartCSS styles the day/week column chart and the tooltip that follows the
 // cursor across it.
 const chartCSS = `
-  .chart { display:flex; align-items:flex-end; gap:2px; height:88px; border-bottom:1px solid #2a2a33; }
+  .panel { padding:14px 16px; margin-top:12px; }
+  .chart { display:flex; align-items:flex-end; gap:3px; height:72px; }
   .chart .col { flex:1 1 0; min-width:2px; height:100%; display:flex; align-items:flex-end; }
-  .chart .bar { width:100%; background:#3b6ea5; border-radius:2px 2px 0 0; }
-  .chart .col:hover .bar { background:#7db5ff; }
-  .axis { display:flex; justify-content:space-between; color:#8b8b96; font-size:11px; margin:4px 0 22px; }
-  #tip { position:fixed; top:0; left:0; z-index:9; pointer-events:none; background:#1b1b22; border:1px solid #3a3a46;
-         border-radius:6px; padding:3px 8px; font-size:12px; white-space:nowrap; box-shadow:0 2px 10px rgba(0,0,0,.45); }
+  .chart .bar { width:100%; background:color-mix(in srgb, var(--accent) 70%, transparent); border-radius:3px 3px 0 0; }
+  .chart .col:hover .bar { background:var(--accent); }
+  .axis { display:flex; justify-content:space-between; color:var(--hint); font-size:11px; margin-top:6px; }
+  #tip { position:fixed; top:0; left:0; z-index:9; pointer-events:none; background:var(--section); border:1px solid var(--divider);
+         border-radius:8px; padding:3px 9px; font-size:12px; white-space:nowrap; box-shadow:0 4px 14px rgba(0,0,0,.25); }
   #tip[hidden] { display:none; }
 `
 
@@ -161,24 +173,42 @@ const chartTip = `<div id="tip" hidden></div>
 })()
 </script>`
 
-// sharedCSS is inlined into both pages. The live dot pulses so an open tab
-// tells you at a glance whether the visitor is still there.
+// sharedCSS is inlined into both pages: the design tokens (TelegramUI-style,
+// dark by default, light under <html data-theme="light">) plus the components
+// the board and the lead page both use — cards, tags, the score badge, the
+// theme switcher.
 const sharedCSS = `
-  body { background:#101014; color:#e8e8ec; font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; margin:0; padding:24px; }
-  .nico { width:15px; height:15px; vertical-align:-3px; }
-  main { max-width:720px; margin:0 auto; }
-  h1 { font-size:18px; margin:0 0 2px; word-break:break-all; }
-  a { color:#7db5ff; text-decoration:none; }
+  :root { --bg:#020100; --section:#1C1C1D; --input:#2A2A2A; --tertiary:#2A2A2A; --text:#FFFFFF; --hint:#AAAAAA;
+          --accent:#2990FF; --divider:rgba(255,255,255,.07); --ok:#32E55E; --bad:#FF5449;
+          --card-shadow:none; --wave-off:rgba(255,255,255,.28); }
+  :root[data-theme="light"] { --bg:#F3F3F3; --section:#FFFFFF; --input:#EFEFF4; --tertiary:#E9E9EE; --text:#000000; --hint:#707579;
+          --accent:#007AFF; --divider:rgba(0,0,0,.08); --ok:#1D9E45; --bad:#E53935;
+          --card-shadow:0 1px 2px rgba(0,0,0,.08); --wave-off:rgba(0,0,0,.22); }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.47 system-ui,-apple-system,BlinkMacSystemFont,"Roboto","Helvetica Neue",sans-serif;
+         -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent; }
+  main { max-width:680px; margin:0 auto; padding:16px 16px 56px; }
+  a { color:var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
-  .tag { font-size:12px; font-weight:600; border-radius:4px; padding:1px 7px; vertical-align:middle;
-         white-space:nowrap; display:inline-block; margin-left:6px; }
-  .tag.first { color:#101014; background:#8b8b96; }
-  .tag.return { color:#101014; background:#5cd58c; }
-  .sub { color:#8b8b96; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#5cd58c; margin-right:6px; vertical-align:middle; animation:pulse 1.6s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
-  .now { color:#5cd58c; }
-  @media (prefers-reduced-motion: reduce) { .dot { animation:none } }
+  button { font-family:inherit; }
+  .sub { color:var(--hint); }
+  .nico { width:14px; height:14px; vertical-align:-2px; }
+  .card { background:var(--section); border-radius:12px; box-shadow:var(--card-shadow); min-width:0; }
+  .top-bar { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .seg { display:flex; background:var(--tertiary); border-radius:9px; padding:2px; gap:2px; flex:0 0 auto; }
+  .seg button { border:0; cursor:pointer; font-size:13px; font-weight:600; border-radius:7px; padding:4px 12px; background:none; color:var(--hint); }
+  :root:not([data-theme="light"]) .seg .t-dark, :root[data-theme="light"] .seg .t-light
+    { background:var(--section); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.15); }
+  .tag { font-size:12px; font-weight:600; border-radius:999px; padding:2px 10px; margin-left:6px;
+         white-space:nowrap; display:inline-block; vertical-align:middle; }
+  .tag.new { background:var(--accent); color:#FFFFFF; }
+  .tag.applied, .tag.approved { background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  .tag.rejected { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  .tag.prepped, .tag.draft { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  .tag.dup { background:none; border:1px solid var(--divider); color:var(--hint); }
+  .tag.who-tag { background:var(--tertiary); color:var(--hint); }
+  .score { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); border-radius:6px;
+           padding:1px 7px; font-weight:700; font-size:13px; margin-right:6px; display:inline-block; }
 `
 
 // markJS turns every `form.mark` into an optimistic async toggle. The form
