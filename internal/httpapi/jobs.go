@@ -564,14 +564,25 @@ func (s *Server) handleJobsBoard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// jobsSubtitle carries the pulse numbers the tiles used to: how fresh the
+// board is and how far through it the reader is. The tiles keep the six
+// decision states; everything descriptive lives up here.
 func jobsSubtitle(listed int, st *store.JobStats) string {
 	if st == nil {
 		return fmt.Sprintf("%d lead(s)", listed)
 	}
+	lead := fmt.Sprintf("%d lead(s)", st.Total)
 	if st.Total > int64(listed) {
-		return fmt.Sprintf("top %d of %d lead(s) · %d not viewed", listed, st.Total, st.Unviewed)
+		lead = fmt.Sprintf("top %d of %d lead(s)", listed, st.Total)
 	}
-	return fmt.Sprintf("%d lead(s) · %d not viewed", listed, st.Unviewed)
+	parts := []string{lead, fmt.Sprintf("%d last 24h", st.Last24h)}
+	if st.Total > 0 {
+		parts = append(parts, fmt.Sprintf("%d%% worked through", (st.Total-st.Unviewed)*100/st.Total))
+	}
+	if st.Duplicates > 0 {
+		parts = append(parts, fmt.Sprintf("%d repeat(s)", st.Duplicates))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // handleJobShow is one lead's detail page. Opening it counts as looking at the
@@ -1251,9 +1262,13 @@ const jobsBoardHTML = `<!doctype html>
   h1 { margin:0; font-size:28px; line-height:36px; font-weight:700; }
   .top-bar { margin-bottom:16px; }
   .top-bar .seg { margin-top:4px; }
-  .chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:6px; }
-  .chips .g { color:var(--hint); font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-right:2px; }
-  .chip { background:var(--tertiary); color:var(--hint); border-radius:999px; padding:4px 12px; font-size:13px; font-weight:600; }
+  /* A label column plus a chip column: the grid keeps every chip row starting
+     at the same x, which is what the old per-row flex could not do. Labels use
+     the same section-header type as every other header on the page. */
+  .filters { display:grid; grid-template-columns:max-content 1fr; gap:10px 14px; align-items:center; margin-bottom:16px; }
+  .filters .g { color:var(--hint); font-size:13px; font-weight:500; letter-spacing:.05em; text-transform:uppercase; }
+  .filters .cs { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+  .chip { background:var(--tertiary); color:var(--hint); border-radius:999px; padding:5px 13px; font-size:13px; font-weight:600; line-height:18px; }
   .chip:hover { text-decoration:none; color:var(--text); }
   .chip.on, .chip.on:hover { background:var(--accent); color:#FFFFFF; }
   /* Grid rather than flex: with six tiles a flex row leaves the last one
@@ -1310,37 +1325,24 @@ const jobsBoardHTML = `<!doctype html>
     <div><h1>Jobs</h1><div class="sub">{{.Sub}}</div></div>
     ` + themeSeg + `
   </div>
-  {{range .Chips}}
-  <div class="chips"><span class="g">{{.Name}}</span>
-    {{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{if .On}}✓ {{end}}{{.Label}}</a>{{end}}
+  <div class="filters">
+    {{range .Chips}}<span class="g">{{.Name}}</span><div class="cs">{{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{.Label}}</a>{{end}}</div>{{end}}
   </div>
-  {{end}}
+  {{/* Six tiles, one per decision state — an even grid instead of a ragged
+       6+3 wrap. The pulse numbers (last 24h, worked through, repeats) moved
+       into the subtitle. */}}
   {{with .Dash}}
   <div class="tiles">
     <div class="card tile"><div class="n">{{.Total}}</div><div class="k">leads</div></div>
-    <div class="card tile"><div class="n">{{.Roles}}</div><div class="k">roles{{if .Duplicates}} · {{.Duplicates}} repeat{{if gt .Duplicates 1}}s{{end}}{{end}}</div></div>
     <div class="card tile"><div class="n">{{.Unviewed}}</div><div class="k">not viewed</div></div>
     <div class="card tile"><div class="n">{{.ToReview}}</div><div class="k">to review</div></div>
     <div class="card tile"><div class="n">{{.ToSend}}</div><div class="k">to send</div></div>
     <div class="card tile"><div class="n">{{.Applied}}</div><div class="k">applied</div></div>
     <div class="card tile"><div class="n">{{.Rejected}}</div><div class="k">rejected</div></div>
-    <div class="card tile"><div class="n">{{.Last24h}}</div><div class="k">last 24h</div></div>
-    <div class="card tile"><div class="n">{{.ViewedPct}}%</div><div class="k">worked through</div></div>
-  </div>
-  <div class="card panel">
-    <div class="chart">
-      {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
-    </div>
-    <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
-  </div>
-  ` + chartTip + `
-  <div class="grid">
-    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
   </div>
   {{end}}
+  {{/* The list is the page's point, so it comes right after the tiles; the
+       chart and breakdowns are the appendix. */}}
   <div class="card list">
   {{range .Rows}}
   <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .DupOf}} dup{{end}}">
@@ -1362,12 +1364,29 @@ const jobsBoardHTML = `<!doctype html>
   <p class="sub empty">no leads under this filter</p>
   {{end}}
   </div>
+  {{with .Dash}}
+  <div class="card panel">
+    <div class="chart">
+      {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
+    </div>
+    <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
+  </div>
+  ` + chartTip + `
+  <div class="grid">
+    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+  </div>
+  {{end}}
 </main>
 ` + themeJS + markJS
 
 // gateJS drives the approve composer: one pill, one round button. Idle with an
 // empty note the button is a mic and starts the Telegram-style recording UI;
-// with text (or a recording running) it is a send button that approves.
+// with text (or a recording running) it is a send button that approves. The
+// "approve without a note" action under the pill is the empty-note approve —
+// without it the only mouse path from an empty pill leads into a recording.
 //
 // When the form carries data-voice (transcription configured), the recording
 // is real: a MediaRecorder captures the microphone and sending posts the audio
@@ -1445,7 +1464,9 @@ const gateJS = `<script>
           mr.start(250)
           if (state === 'paused') { try { mr.pause() } catch (e) {} }
         } catch (e) { mr = null }
-      }).catch(function () {})
+      }).catch(function () { errEl.textContent = "mic unavailable — recording won't be saved" })
+    } else {
+      errEl.textContent = "mic unavailable — recording won't be saved"
     }
     tick = setInterval(function () {
       if (state !== 'rec') return
@@ -1534,6 +1555,10 @@ const gateJS = `<script>
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); doSend(false) }
   })
+  // The mic owns the round button when the pill is empty, so this is the
+  // click that approves with no note at all.
+  var skip = f.querySelector('.gc-skip')
+  if (skip) skip.addEventListener('click', function () { doSend(false) })
   f.addEventListener('submit', function (e) {
     e.preventDefault()
     if (state === 'idle' && !input.value.trim()) { start(); return }
@@ -1551,10 +1576,13 @@ const jobShowHTML = `<!doctype html>
   .head { padding:16px; }
   h1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:20px; line-height:24px; font-weight:700; margin:0; }
   h1 .score { font-size:15px; border-radius:8px; padding:2px 9px; margin:0; }
-  /* One status chip, picked by the classes on <main> so the async toggles
-     (applied, approved) move it without a reload. Priority: ruled out beats
-     applied, applied beats approved, approved beats needing review. */
-  .st { display:none; margin-left:auto; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
+  /* One status chip on its own row under the title, picked by the classes on
+     <main> so the async toggles (applied, approved) move it without a reload.
+     Priority: ruled out beats applied, applied beats approved, approved beats
+     needing review. Its own row because a chip pushed right of a long title
+     wraps into a lone right-aligned island. */
+  .st-row { margin-top:8px; }
+  .st { display:none; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
   main.rejected .st-rejected { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
   main:not(.rejected).applied .st-applied { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
   main:not(.rejected):not(.applied).approved .st-approved { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
@@ -1600,7 +1628,11 @@ const jobShowHTML = `<!doctype html>
   .gc-err { color:var(--bad); font-size:13px; line-height:20px; padding:0 6px 10px; }
   .gc-err:empty { display:none; }
   .gc-row { display:flex; align-items:center; gap:8px; }
-  .gc-trash { display:none; background:none; border:0; color:var(--bad); font-size:20px; line-height:1; cursor:pointer; padding:8px; flex:0 0 auto; }
+  .gc-trash { display:none; background:none; border:0; color:var(--bad); line-height:0; cursor:pointer; padding:8px; flex:0 0 auto; }
+  .gc-trash svg { width:20px; height:20px; fill:currentColor; }
+  .gc-skip { display:block; background:none; border:0; color:var(--accent); font-size:13px; font-weight:600; cursor:pointer; padding:10px 6px 0; }
+  .gc-skip:hover { text-decoration:underline; }
+  .gate-compose.txt .gc-skip, .gate-compose.rec .gc-skip { display:none; }
   .pill { flex:1; display:flex; align-items:center; gap:10px; background:var(--input); border-radius:999px; height:46px; padding:0 14px; min-width:0; }
   .pill input { flex:1; background:none; border:0; outline:none; color:var(--text); font:inherit; font-size:15px; min-width:0; }
   .pill input::placeholder { color:var(--hint); }
@@ -1622,7 +1654,7 @@ const jobShowHTML = `<!doctype html>
   .send { width:46px; height:46px; border-radius:50%; background:var(--accent); border:0; cursor:pointer; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
   .send[disabled] { opacity:.6; cursor:default; }
   .send svg { width:24px; height:24px; display:block; fill:#FFFFFF; }
-  .send .fly { display:none; width:0; height:0; border-left:16px solid #FFFFFF; border-top:9px solid transparent; border-bottom:9px solid transparent; margin-left:4px; }
+  .send .fly { display:none; width:22px; height:22px; margin-left:2px; }
   .gate-compose.txt .send .mic, .gate-compose.rec .send .mic { display:none; }
   .gate-compose.txt .send .fly, .gate-compose.rec .send .fly { display:block; }
   @keyframes jhPulse { 0%,100% { opacity:1 } 50% { opacity:.25 } }
@@ -1641,8 +1673,9 @@ const jobShowHTML = `<!doctype html>
     ` + themeSeg + `
   </div>
   <div class="card head">
-    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></h1>
-    <div class="meta">{{with .J.Profile}}<span class="tag who-tag">{{.}}</span> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{ts .ViewedAt}} UTC{{end}}{{if .Applied}} · applied {{ts .AppliedAt}} UTC{{end}}{{if .Approved}} · approved {{ts .ApprovedAt}} UTC{{end}}</div>
+    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span></h1>
+    <div class="st-row"><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></div>
+    <div class="meta">{{with .J.Profile}}<span class="tag who-tag">{{.}}</span> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}</div>
     <div class="actions">
       <a class="btn" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
       {{if .HasPostingURL}}<a class="btn" href="{{.PostingURL}}" target="_blank" rel="noopener">the real posting ↗</a>{{end}}
@@ -1650,7 +1683,7 @@ const jobShowHTML = `<!doctype html>
       <form class="mark{{if .Applied}} on{{end}}" method="post" action="{{.MarkLink}}" data-state="applied" data-mark="mark as applied" data-undo="undo applied"><button type="submit" class="btn ok">{{.MarkLabel}}</button></form>
     </div>
   </div>
-  {{if .J.Rejected}}<div class="sec">ruled out {{ts .J.RejectedAt}} UTC</div><div class="card box bad"><div class="body">{{.J.RejectReason}}</div></div>{{end}}
+  {{if .J.Rejected}}<div class="sec">ruled out {{when .J.RejectedAt}}</div><div class="card box bad"><div class="body">{{.J.RejectReason}}</div></div>{{end}}
   {{if .DupOf}}<div class="sec">repeat</div><div class="card box"><div class="body">Same role as <a href="{{.DupLink}}">lead #{{.DupOf}}</a>. Work that one.</div></div>{{end}}
   {{if .Repeats}}<div class="sec">also posted as</div><div class="card box">{{range .Repeats}}<div><a href="{{.Link}}">#{{.ID}} · {{.Label}}</a></div>{{end}}</div>{{end}}
   {{/* The review gate: one composer, one send. Sending approves; the note in
@@ -1658,10 +1691,10 @@ const jobShowHTML = `<!doctype html>
        preview — the recording UI is real, the audio is not kept yet. */}}
   <div class="sec">approve for applying</div>
   <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}"{{if .VoiceLink}} data-voice="{{.VoiceLink}}"{{end}}>
-    <div class="gc-hint">Sending approves this lead for the AI apply stage. The note is optional — type it{{if .VoiceLink}}, or record it and the transcript becomes the note{{else}}, or record it (voice is a preview and is not saved yet){{end}}.</div>
+    <div class="gc-hint">Send approves this lead for the AI apply stage — note optional, typed{{if .VoiceLink}} or recorded{{else}} (voice is a preview, not saved yet){{end}}.</div>
     <div class="gc-err"></div>
     <div class="gc-row">
-      <button type="button" class="gc-trash" title="delete recording">✕</button>
+      <button type="button" class="gc-trash" title="delete recording"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3.5 6h13l-.95 11.4a1.8 1.8 0 0 1-1.8 1.6H8.25a1.8 1.8 0 0 1-1.8-1.6L5.5 9zm4.4 2.2.35 8h1.5l-.35-8h-1.5zm4.7 0-.35 8h1.5l.35-8h-1.5z"></path></svg></button>
       <div class="pill">
         <input name="notes" value="{{.ReviewNotes}}" placeholder="note for the AI apply stage (optional)" autocomplete="off">
         <span class="rec-dot"></span>
@@ -1671,12 +1704,13 @@ const jobShowHTML = `<!doctype html>
       </div>
       <button type="submit" class="send" title="approve for applying">
         <svg class="mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 1 0-7 0v6a3.5 3.5 0 0 0 3.5 3.5z"></path><path d="M18.5 12a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.44V20.5a.9.9 0 0 0 1.8 0v-2.06A6.5 6.5 0 0 0 18.5 12z"></path></svg>
-        <span class="fly"></span>
+        <svg class="fly" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 21.5l19-9.5-19-9.5-.01 7.5L15.5 12 2.49 14z"></path></svg>
       </button>
     </div>
+    <button type="button" class="gc-skip">approve without a note</button>
   </form>
   <div class="card gate-done">
-    <div><span class="ok-pill">✓ approved · ready to apply</span><span class="gd-when">{{if .Approved}}approved {{ts .ApprovedAt}} UTC{{end}}</span></div>
+    <div><span class="ok-pill">✓ approved · ready to apply</span><span class="gd-when">{{if .Approved}}approved {{when .ApprovedAt}}{{end}}</span></div>
     <div class="gate-note">{{.ReviewNotes}}</div>
     <form class="mark" method="post" action="{{.ApproveLink}}" data-state="approved" data-mark="withdraw approval" data-undo="withdraw approval"><button type="submit" class="withdraw">withdraw approval</button></form>
   </div>

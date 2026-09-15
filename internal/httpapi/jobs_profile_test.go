@@ -77,9 +77,9 @@ func TestJobsBoardProfileChips(t *testing.T) {
 		t.Fatalf("board: %d", w.Code)
 	}
 	body := w.Body.String()
-	// "everyone" is the active chip on an unfiltered board, so it renders with
-	// the ✓ the template puts in front of every active chip.
-	for _, want := range []string{">profile<", "profile=polina", "profile=" + store.DefaultJobProfile, "✓ everyone<"} {
+	// "everyone" is the active chip on an unfiltered board, so it carries the
+	// filled `on` class the template gives every active chip.
+	for _, want := range []string{">profile<", "profile=polina", "profile=" + store.DefaultJobProfile, `class="chip on"`, ">everyone<"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board missing %q", want)
 		}

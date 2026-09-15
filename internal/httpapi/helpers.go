@@ -36,6 +36,7 @@ func plainRows(rows []store.LabelStat) []statRowView {
 
 var pageFuncs = template.FuncMap{
 	"ts":     func(t time.Time) string { return t.UTC().Format("Jan 2, 2006 15:04:05") },
+	"when":   func(t time.Time) string { return humanWhen(t, time.Now()) },
 	"dur":    humanDuration,
 	"inputs": inputKinds,
 	"ms": func(ms int64) string {
@@ -50,6 +51,27 @@ var pageFuncs = template.FuncMap{
 		}
 		return humanDuration(time.Duration(sec) * time.Second)
 	},
+}
+
+// humanWhen renders a moment the way a person says it — "today 18:02",
+// "yesterday 09:12" — and falls back to the date once it is further away.
+// Days are UTC days, the clock every timestamp on these pages already runs on.
+func humanWhen(t, now time.Time) string {
+	t, now = t.UTC(), now.UTC()
+	sameDay := func(a, b time.Time) bool {
+		ay, am, ad := a.Date()
+		by, bm, bd := b.Date()
+		return ay == by && am == bm && ad == bd
+	}
+	switch {
+	case sameDay(t, now):
+		return "today " + t.Format("15:04")
+	case sameDay(t.AddDate(0, 0, 1), now):
+		return "yesterday " + t.Format("15:04")
+	case t.Year() == now.Year():
+		return t.Format("Jan 2 15:04")
+	}
+	return t.Format("Jan 2, 2006")
 }
 
 func humanDuration(d time.Duration) string {
@@ -191,6 +213,9 @@ const sharedCSS = `
   a { color:var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
   button { font-family:inherit; }
+  /* Everything interactive here is borderless, so the keyboard needs its own
+     affordance; :focus-visible keeps it away from mouse and touch. */
+  a:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .sub { color:var(--hint); }
   .nico { width:14px; height:14px; vertical-align:-2px; }
   .card { background:var(--section); border-radius:12px; box-shadow:var(--card-shadow); min-width:0; }
