@@ -22,7 +22,11 @@ type Server struct {
 	BasePath string
 	// Origin is the public scheme+host (e.g. "https://board.example.com").
 	// Only links that leave the site need it; in-page links stay relative.
-	Origin   string
+	Origin string
+	// STT transcribes the composer's voice notes. Nil means the feature is
+	// off: the endpoint answers 503 and the page falls back to preview-only
+	// recording, so a board without an ElevenLabs key loses nothing else.
+	STT      *ElevenLabsSTT
 	mux      *http.ServeMux
 	keyGuard keyThrottle
 }
@@ -51,6 +55,7 @@ func New(st *store.Store, apiToken, viewKey string) *Server {
 	mux.HandleFunc("POST /jobs/{id}/applied", s.handleJobAppliedToggle)
 	mux.HandleFunc("POST /jobs/{id}/approved", s.handleJobApproveToggle)
 	mux.HandleFunc("POST /jobs/{id}/notes", s.handleJobNotes)
+	mux.HandleFunc("POST /jobs/{id}/voice", s.handleJobVoice)
 	s.mux = mux
 	return s
 }

@@ -598,6 +598,12 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 	if job.Applied() {
 		markLabel = "undo applied"
 	}
+	// The voice link only exists when transcription is configured, and its
+	// absence is what tells the page to keep recordings a preview.
+	voiceLink := ""
+	if s.STT != nil {
+		voiceLink = fmt.Sprintf("%s/jobs/%d/voice?k=%s", s.BasePath, job.ID, s.LinkKey(jobScope(job.ID)))
+	}
 	// A malformed blob costs the reader the prep boxes, not the page. Prep is
 	// written by an agent against a schema this struct does not enforce, so the
 	// one thing that must not happen is the whole lead becoming unreadable
@@ -637,6 +643,7 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		ApproveLink: fmt.Sprintf("%s/jobs/%d/approved?k=%s&back=%s",
 			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID)),
 			url.QueryEscape(s.BasePath+r.URL.RequestURI())),
+		VoiceLink: voiceLink,
 		NotesLink: fmt.Sprintf("%s/jobs/%d/notes?k=%s",
 			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID))),
 		// The resolved posting is shown as its own link rather than replacing
@@ -1148,9 +1155,12 @@ type jobShowData struct {
 	ReviewNotes string
 	// Noted is the one-shot "the note you just saved is really saved" flag,
 	// carried by the save redirect's ?noted=1 and gone on the next reload.
-	Noted         bool
-	ApproveLink   string
-	NotesLink     string
+	Noted       bool
+	ApproveLink string
+	NotesLink   string
+	// VoiceLink is the transcription endpoint for this lead, empty when no
+	// speech-to-text is configured; the composer reads it off a data attr.
+	VoiceLink     string
 	PostingURL    string
 	HasPostingURL bool
 	// DupOf/DupLink point at the canonical lead when this one is a repeat;
@@ -1357,10 +1367,14 @@ const jobsBoardHTML = `<!doctype html>
 
 // gateJS drives the approve composer: one pill, one round button. Idle with an
 // empty note the button is a mic and starts the Telegram-style recording UI;
-// with text (or a recording running) it is a send button that approves. The
-// recording itself is a preview — levels are drawn from the real microphone
-// when permission is granted (simulated otherwise), but no audio is kept or
-// uploaded. Sending while recording approves with the note left untouched.
+// with text (or a recording running) it is a send button that approves.
+//
+// When the form carries data-voice (transcription configured), the recording
+// is real: a MediaRecorder captures the microphone and sending posts the audio
+// to the voice endpoint, which transcribes it and saves the transcript as the
+// note. Without data-voice — or when the mic never yielded audio — sending a
+// recording falls back to a plain approve with the note left untouched, which
+// is the old preview behaviour.
 //
 // Without JavaScript the form still posts notes + approve and redirects, the
 // same fallback every other toggle on these pages has.
@@ -1373,7 +1387,10 @@ const gateJS = `<script>
   var send = f.querySelector('.send')
   var wave = f.querySelector('.rec-wave')
   var timeEl = f.querySelector('.rec-time')
-  var state = 'idle', ms = 0, levels = [], last = 0.4, tick = null, stream = null, actx = null, an = null
+  var errEl = f.querySelector('.gc-err')
+  var voice = f.dataset.voice
+  var state = 'idle', ms = 0, levels = [], last = 0.4, tick = null
+  var stream = null, actx = null, an = null, mr = null, chunks = []
 
   function face () { f.classList.toggle('txt', state !== 'idle' || !!input.value.trim()) }
   input.addEventListener('input', face); face()
@@ -1409,7 +1426,8 @@ const gateJS = `<script>
     })
   }
   function start () {
-    state = 'rec'; ms = 0; levels = []
+    state = 'rec'; ms = 0; levels = []; chunks = []
+    errEl.textContent = ''
     f.classList.add('rec'); f.classList.remove('paused'); face()
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true }).then(function (st) {
@@ -1421,6 +1439,12 @@ const gateJS = `<script>
           an = actx.createAnalyser(); an.fftSize = 256
           src.connect(an)
         } catch (e) {}
+        try {
+          mr = new MediaRecorder(st)
+          mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data) }
+          mr.start(250)
+          if (state === 'paused') { try { mr.pause() } catch (e) {} }
+        } catch (e) { mr = null }
       }).catch(function () {})
     }
     tick = setInterval(function () {
@@ -1432,38 +1456,80 @@ const gateJS = `<script>
   }
   function stopAll () {
     clearInterval(tick); tick = null
+    if (mr && mr.state !== 'inactive') { try { mr.stop() } catch (e) {} }
     if (stream) stream.getTracks().forEach(function (t) { t.stop() })
     if (actx) { try { actx.close() } catch (e) {} }
-    stream = actx = an = null
+    stream = actx = an = mr = null
   }
   function discard () {
-    stopAll(); state = 'idle'
+    stopAll(); state = 'idle'; chunks = []
     f.classList.remove('rec', 'paused')
     timeEl.textContent = '0:00,0'
     face()
   }
   f.querySelector('.gc-trash').addEventListener('click', discard)
   f.querySelector('.rec-pause').addEventListener('click', function () {
-    if (state === 'rec') { state = 'paused'; f.classList.add('paused') }
-    else if (state === 'paused') { state = 'rec'; f.classList.remove('paused') }
+    if (state === 'rec') {
+      state = 'paused'; f.classList.add('paused')
+      if (mr && mr.state === 'recording') { try { mr.pause() } catch (e) {} }
+    } else if (state === 'paused') {
+      state = 'rec'; f.classList.remove('paused')
+      if (mr && mr.state === 'paused') { try { mr.resume() } catch (e) {} }
+    }
   })
-  function doSend (voice) {
+  function approved (d, note) {
+    if (note !== null) {
+      input.value = note; face()
+      document.querySelector('.gate-note').textContent = note
+    }
+    document.querySelector('.gd-when').textContent = 'approved just now'
+    main.classList.toggle('approved', d.on !== false)
+  }
+  function doSend (asVoice) {
     var note = input.value.trim()
+    errEl.textContent = ''
     send.disabled = true
     fetch(f.action, {
       method: 'POST',
       headers: { 'Accept': 'application/json' },
-      body: voice ? null : new URLSearchParams({ notes: note })
+      body: asVoice ? null : new URLSearchParams({ notes: note })
     })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() })
       .then(function (d) {
-        if (voice) discard()
-        else document.querySelector('.gate-note').textContent = note
-        document.querySelector('.gd-when').textContent = 'approved just now'
-        main.classList.toggle('approved', d.on)
+        if (asVoice) discard()
+        approved(d, asVoice ? null : note)
       })
-      .catch(function () {})
+      .catch(function () { errEl.textContent = 'approving failed — try again' })
       .then(function () { send.disabled = false })
+  }
+  function uploadVoice (blob) {
+    if (!blob.size) { doSend(true); return }
+    errEl.textContent = ''
+    send.disabled = true
+    fetch(voice, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': blob.type || 'audio/webm' },
+      body: blob
+    })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() })
+      .then(function (d) { approved(d, d.notes || '') })
+      .catch(function () { errEl.textContent = 'transcription failed — type the note instead' })
+      .then(function () { send.disabled = false })
+  }
+  function sendRecording () {
+    var rec = mr
+    if (voice && rec && rec.state !== 'inactive') {
+      // Let the recorder flush its last chunk before the blob is built.
+      rec.onstop = function () {
+        var blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' })
+        discard()
+        uploadVoice(blob)
+      }
+      try { rec.stop() } catch (e) { discard(); doSend(true) }
+    } else {
+      discard()
+      doSend(true)
+    }
   }
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); doSend(false) }
@@ -1471,7 +1537,8 @@ const gateJS = `<script>
   f.addEventListener('submit', function (e) {
     e.preventDefault()
     if (state === 'idle' && !input.value.trim()) { start(); return }
-    doSend(state !== 'idle')
+    if (state !== 'idle') sendRecording()
+    else doSend(false)
   })
 })()
 </script>`
@@ -1530,6 +1597,8 @@ const jobShowHTML = `<!doctype html>
   main:not(.approved) .gate-done { display:none; }
   .gate-compose { display:block; padding:12px; }
   .gc-hint { color:var(--hint); font-size:13px; line-height:20px; padding:0 6px 10px; }
+  .gc-err { color:var(--bad); font-size:13px; line-height:20px; padding:0 6px 10px; }
+  .gc-err:empty { display:none; }
   .gc-row { display:flex; align-items:center; gap:8px; }
   .gc-trash { display:none; background:none; border:0; color:var(--bad); font-size:20px; line-height:1; cursor:pointer; padding:8px; flex:0 0 auto; }
   .pill { flex:1; display:flex; align-items:center; gap:10px; background:var(--input); border-radius:999px; height:46px; padding:0 14px; min-width:0; }
@@ -1588,8 +1657,9 @@ const jobShowHTML = `<!doctype html>
        the pill rides along (empty is fine). The mic face starts the voice-note
        preview — the recording UI is real, the audio is not kept yet. */}}
   <div class="sec">approve for applying</div>
-  <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}">
-    <div class="gc-hint">Sending approves this lead for the AI apply stage. The note is optional — type it, or record it (voice is a preview and is not saved yet).</div>
+  <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}"{{if .VoiceLink}} data-voice="{{.VoiceLink}}"{{end}}>
+    <div class="gc-hint">Sending approves this lead for the AI apply stage. The note is optional — type it{{if .VoiceLink}}, or record it and the transcript becomes the note{{else}}, or record it (voice is a preview and is not saved yet){{end}}.</div>
+    <div class="gc-err"></div>
     <div class="gc-row">
       <button type="button" class="gc-trash" title="delete recording">✕</button>
       <div class="pill">

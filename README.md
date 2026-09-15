@@ -73,6 +73,9 @@ curl -X POST localhost:8080/api/jobs -H 'Authorization: Bearer change-me' \
 | `PORT` | Listen port (default `8080`) |
 | `DEFAULT_PROFILE` | Who owns leads pushed without a `profile` (default `me`) |
 | `PROFILES` | Comma-separated seekers whose board chips exist before their first lead |
+| `ELEVENLABS_API_KEY` | Enables voice notes: the approve composer's recordings are transcribed and saved as the review note. Unset, recording stays an on-page preview |
+| `ELEVENLABS_STT_MODEL` | Speech-to-text model (default `scribe_v2`) |
+| `ELEVENLABS_BASE_URL` | Override the ElevenLabs endpoint (proxies, tests) |
 
 ## API
 
@@ -91,7 +94,11 @@ row id or a `dedupe_key`.
 | `DELETE /api/jobs`, `DELETE /api/jobs/{id}` | Purge everything / delete one lead |
 
 The board's own buttons (approve, applied, notes) post with the page's link
-key instead of the API token, so the review works from a phone.
+key instead of the API token, so the review works from a phone. That includes
+`POST /jobs/{id}/voice`: the composer records a voice note in the browser,
+posts the audio there, and the ElevenLabs transcript is saved as the review
+note while the lead is approved — the spoken version of typing a caveat and
+hitting send.
 
 ## License
 

@@ -45,6 +45,15 @@ func main() {
 	defer st.Close()
 
 	server := httpapi.New(st, apiToken, viewKey)
+	// Voice notes are optional: with a key the composer's recordings are
+	// transcribed into the review note, without one they stay a preview.
+	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" {
+		stt := httpapi.NewElevenLabsSTT(key, os.Getenv("ELEVENLABS_STT_MODEL"))
+		if base := os.Getenv("ELEVENLABS_BASE_URL"); base != "" {
+			stt.BaseURL = strings.TrimRight(base, "/")
+		}
+		server.STT = stt
+	}
 	// The public URL may mount the app under a path (e.g. /trk); links in the
 	// HTML pages must carry that prefix since the proxy strips it before us.
 	// The origin feeds any absolute link the app mints.
