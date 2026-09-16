@@ -642,7 +642,10 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		GoLink:    fmt.Sprintf("%s/jobs/%d/go?k=%s", s.BasePath, job.ID, s.LinkKey(jobScope(job.ID))),
 		MarkLink:  s.jobAppliedLink(job.ID, s.BasePath+r.URL.RequestURI()),
 		MarkLabel: markLabel,
-		BackTo:    fmt.Sprintf("%s/jobs?k=%s", s.BasePath, s.LinkKey(jobsScope())),
+		// The board URL the reader arrived from, so going back restores the
+		// filter they were reading under. safeBack falls back to the plain board
+		// for a link that arrived without one (or with someone else's).
+		BackTo: s.safeBack(r.URL.Query().Get("back")),
 		DupOf:     job.DuplicateOf,
 
 		Prep:        prep,
@@ -844,7 +847,7 @@ func (s *Server) jobRows(jobs []store.Job, now time.Time, back string, showProfi
 			DupLink:   dupLink,
 			DupCount:  dupCounts[j.ID],
 			HasDraft:  j.Draft != "",
-			ShowLink:  fmt.Sprintf("%s/jobs/%d?k=%s", s.BasePath, j.ID, s.LinkKey(jobScope(j.ID))),
+			ShowLink:  s.jobShowLink(j.ID, back),
 			GoLink:    fmt.Sprintf("%s/jobs/%d/go?k=%s", s.BasePath, j.ID, s.LinkKey(jobScope(j.ID))),
 			MarkLink:  s.jobAppliedLink(j.ID, back),
 			MarkLabel: markLabel,
@@ -864,6 +867,18 @@ type chipView struct {
 type chipGroup struct {
 	Name  string
 	Chips []chipView
+}
+
+// jobShowLink is a lead's detail page, carrying the board URL the reader came
+// from. Without it "‹ Jobs" lands on an unfiltered board, so opening one lead
+// out of a filtered list costs the filter — the reader has to set it again on
+// every trip back.
+func (s *Server) jobShowLink(id int64, back string) string {
+	q := url.Values{"k": {s.LinkKey(jobScope(id))}}
+	if back != "" {
+		q.Set("back", back)
+	}
+	return fmt.Sprintf("%s/jobs/%d?%s", s.BasePath, id, q.Encode())
 }
 
 // jobAppliedLink is the POST target for the applied toggle: the lead's own
@@ -1580,11 +1595,17 @@ const jobShowHTML = `<!doctype html>
      the board, where every row would otherwise shout. */
   .meta .tag.who-tag { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
-  .btn { display:inline-block; border:0; cursor:pointer; font-size:15px; font-weight:600; border-radius:10px; padding:9px 14px;
+  /* Links and buttons sit side by side here, so both need the same box: a
+     <button> does not inherit line-height and would otherwise come out a few
+     pixels shorter than the <a> next to it. */
+  .btn { display:inline-flex; align-items:center; box-sizing:border-box; min-height:40px; border:0; cursor:pointer;
+         font-size:15px; line-height:20px; font-weight:600; border-radius:10px; padding:9px 14px;
          background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); }
   a.btn:hover { text-decoration:none; opacity:.85; }
   .btn.ok { background:color-mix(in srgb, var(--ok) 13%, transparent); color:var(--ok); }
-  .mark { display:inline; margin:0; }
+  /* The applied toggle is a form wrapping one .btn; as a flex item it must not
+     add height of its own around the button. */
+  .mark { display:flex; margin:0; }
   /* Section label outside, content card under it — the Telegram list shape. */
   .sec { color:var(--hint); font-size:13px; font-weight:500; text-transform:uppercase; letter-spacing:.05em; margin:24px 16px 8px; }
   .box { padding:14px 16px; }
@@ -1613,7 +1634,6 @@ const jobShowHTML = `<!doctype html>
   main.approved .gate-compose { display:none; }
   main:not(.approved) .gate-done { display:none; }
   .gate-compose { display:block; padding:12px; }
-  .gc-hint { color:var(--hint); font-size:13px; line-height:20px; padding:0 6px 10px; }
   .gc-err { color:var(--bad); font-size:13px; line-height:20px; padding:0 6px 10px; }
   .gc-err:empty { display:none; }
   .gc-row { display:flex; align-items:center; gap:8px; }
@@ -1679,7 +1699,6 @@ const jobShowHTML = `<!doctype html>
        preview — the recording UI is real, the audio is not kept yet. */}}
   <div class="sec">approve for applying</div>
   <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}"{{if .VoiceLink}} data-voice="{{.VoiceLink}}"{{end}}>
-    <div class="gc-hint">Send approves this lead for the AI apply stage — note optional, typed{{if .VoiceLink}} or recorded{{else}} (voice is a preview, not saved yet){{end}}.</div>
     <div class="gc-err"></div>
     <div class="gc-row">
       <button type="button" class="gc-trash" title="delete recording"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3.5 6h13l-.95 11.4a1.8 1.8 0 0 1-1.8 1.6H8.25a1.8 1.8 0 0 1-1.8-1.6L5.5 9zm4.4 2.2.35 8h1.5l-.35-8h-1.5zm4.7 0-.35 8h1.5l.35-8h-1.5z"></path></svg></button>
@@ -1690,7 +1709,10 @@ const jobShowHTML = `<!doctype html>
         <span class="rec-time">0:00,0</span>
         <button type="button" class="rec-pause" title="pause / resume"><i></i><i></i><span class="tri"></span></button>
       </div>
-      <button type="submit" class="send" title="approve for applying">
+      {{/* With no transcription configured a recording approves without
+           saving anything, so the tooltip says so rather than letting the mic
+           promise a note it cannot keep. */}}
+      <button type="submit" class="send" title="approve for applying{{if not .VoiceLink}} (voice is a preview, not saved yet){{end}}">
         <svg class="mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 1 0-7 0v6a3.5 3.5 0 0 0 3.5 3.5z"></path><path d="M18.5 12a.9.9 0 0 0-1.8 0 4.7 4.7 0 0 1-9.4 0 .9.9 0 0 0-1.8 0 6.5 6.5 0 0 0 5.6 6.44V20.5a.9.9 0 0 0 1.8 0v-2.06A6.5 6.5 0 0 0 18.5 12z"></path></svg>
         <svg class="fly" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 21.5l19-9.5-19-9.5-.01 7.5L15.5 12 2.49 14z"></path></svg>
       </button>

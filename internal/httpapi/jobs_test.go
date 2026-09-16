@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -153,5 +155,39 @@ func TestJobsJSONFilter(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].DedupeKey != "t3_go1" {
 		t.Fatalf("filtered json: %+v", jobs)
+	}
+}
+
+// Opening a lead from a filtered board and coming back has to land on the same
+// filtered board. The filter rides in the row's link as `back`, and the lead
+// page's "‹ Jobs" is that URL — otherwise reading a filtered queue means
+// setting the filter again after every lead.
+func TestLeadPageBackLinkKeepsTheBoardFilter(t *testing.T) {
+	s, _ := testServer(t)
+	ingestJobs(t, s)
+
+	board := "/jobs?k=" + s.LinkKey(jobsScope()) + "&prepped=0&since=7d"
+	req := httptest.NewRequest("GET", board, nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "back=") {
+		t.Fatal("board rows link to leads without carrying the board URL")
+	}
+
+	id := firstJobID(t, s)
+	lead := "/jobs/" + itoa(id) + "?k=" + s.LinkKey(jobScope(id)) +
+		"&back=" + url.QueryEscape(board)
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", lead, nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="`+html.EscapeString(board)+`"`) {
+		t.Fatal("‹ Jobs dropped the filter the reader came from")
+	}
+
+	// Arriving without a back (a link pasted into Telegram) still works.
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/jobs/"+itoa(id)+"?k="+s.LinkKey(jobScope(id)), nil))
+	if !strings.Contains(rec.Body.String(), `href="/jobs?k=`+s.LinkKey(jobsScope())+`"`) {
+		t.Fatal("a lead opened without a back link lost its way to the board")
 	}
 }
