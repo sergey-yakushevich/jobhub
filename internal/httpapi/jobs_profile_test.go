@@ -103,10 +103,10 @@ func TestJobsBoardProfileChips(t *testing.T) {
 		t.Fatal("single-profile board still repeats the profile tag on every row")
 	}
 
-	// Chips compose: switching network from within Polina's board keeps her
+	// Chips compose: narrowing the window from within Polina's board keeps her
 	// profile in the link rather than dropping back to everyone.
-	if !strings.Contains(body, "net=x") || !strings.Contains(body, "profile=polina") {
-		t.Fatal("network chips dropped the active profile")
+	if !strings.Contains(body, "since=24h") || !strings.Contains(body, "profile=polina") {
+		t.Fatal("window chips dropped the active profile")
 	}
 }
 

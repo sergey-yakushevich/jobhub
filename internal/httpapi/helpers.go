@@ -231,7 +231,7 @@ const sharedCSS = `
   .tag.rejected { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
   .tag.prepped, .tag.draft { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .tag.dup { background:none; border:1px solid var(--divider); color:var(--hint); }
-  .tag.who-tag { background:var(--tertiary); color:var(--hint); }
+  .tag.who-tag { background:var(--tertiary); color:var(--hint); border-radius:5px; padding:0 6px; }
   .score { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); border-radius:6px;
            padding:1px 7px; font-weight:700; font-size:13px; margin-right:6px; display:inline-block; }
 `

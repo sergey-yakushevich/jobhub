@@ -904,8 +904,8 @@ func (s *Server) jobsLink(f store.JobFilter, since string) string {
 }
 
 // jobChips builds the filter rows. Every link is the board URL with exactly
-// one parameter changed, so filters compose: profile + network + type + window
-// + new all narrow together.
+// one parameter changed, so filters compose: profile + status + window + new
+// all narrow together.
 //
 // profiles is every seeker the board should offer, so a profile whose first
 // sweep has not landed yet still gets a chip to click.
@@ -982,27 +982,10 @@ func (s *Server) jobChips(f store.JobFilter, profiles []string) []chipGroup {
 			{Label: "approved", On: f.Approved == "1",
 				Link: with(func(n *store.JobFilter, _ *string) { n.Approved = toggle(f.Approved, "1") })},
 		}},
-		chipGroup{Name: "roles", Chips: []chipView{
-			{Label: "one per role", On: f.Duplicates == "0",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Duplicates = toggle(f.Duplicates, "0") })},
-			{Label: "repeats", On: f.Duplicates == "1",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Duplicates = toggle(f.Duplicates, "1") })},
-		}},
 	)
-	nets := chipGroup{Name: "network"}
-	for _, n := range []string{"reddit", "x", "linkedin"} {
-		want := toggle(f.Network, n)
-		nets.Chips = append(nets.Chips, chipView{Label: n, On: f.Network == n,
-			Link: with(func(nf *store.JobFilter, _ *string) { nf.Network = want })})
-	}
-	groups = append(groups, nets)
-	types := chipGroup{Name: "type"}
-	for _, tp := range []string{"job", "contract", "cofounder", "other"} {
-		want := toggle(f.JobType, tp)
-		types.Chips = append(types.Chips, chipView{Label: tp, On: f.JobType == tp,
-			Link: with(func(n *store.JobFilter, _ *string) { n.JobType = want })})
-	}
-	groups = append(groups, types)
+	// Network, type and duplicates stay filterable by URL, but earn no chips:
+	// the breakdown cards already answer "where do leads come from", and rows
+	// answer "what kind is this one". Chips are for the decision states.
 	windows := chipGroup{Name: "found"}
 	for _, wdw := range []string{"24h", "7d", "30d"} {
 		want := toggle(sinceStr, wdw)
@@ -1285,7 +1268,7 @@ const jobsBoardHTML = `<!doctype html>
   .bd .r .c { color:var(--hint); white-space:nowrap; }
   /* One section holds the whole list, Telegram style: rows divided, not boxed. */
   .list { margin-top:16px; overflow:hidden; }
-  .row { display:flex; align-items:center; gap:2px; padding:0 8px 0 16px; border-bottom:1px solid var(--divider); }
+  .row { display:flex; align-items:center; gap:12px; padding:0 16px; border-bottom:1px solid var(--divider); }
   .row:last-child { border-bottom:0; }
   .row.seen, .row.dup { opacity:.6; }
   /* Applied is the one state worth seeing from across the list, so it tints
@@ -1297,13 +1280,17 @@ const jobsBoardHTML = `<!doctype html>
   .row.rejected .snippet { color:color-mix(in srgb, var(--bad) 60%, var(--text)); }
   .row .main { flex:1 1 auto; min-width:0; padding:12px 0; color:inherit; display:block; }
   .row .main:hover { text-decoration:none; }
-  .row .top { display:flex; justify-content:space-between; flex-wrap:wrap; gap:2px 12px; }
+  /* Tags ride next to the author with the row's own gap — the design keeps
+     them in the reading flow rather than pushed to the far edge. */
+  .row .top { display:flex; align-items:center; flex-wrap:wrap; gap:2px 8px; }
+  .row .top .tag { margin-left:0; }
+  .row .top .score { margin-right:0; }
   .row .who { font-weight:600; word-break:break-word; }
   .row.dup .score { background:var(--tertiary); color:var(--hint); }
   .meta { color:var(--hint); font-size:13px; margin-top:2px; }
   .meta .tag { margin:0 2px 0 0; }
   .snippet { word-break:break-word; margin-top:2px; }
-  .row .out { flex:0 0 auto; font-size:13px; font-weight:600; white-space:nowrap; padding:8px 6px; }
+  .row .out { flex:0 0 auto; font-size:13px; font-weight:600; white-space:nowrap; padding:8px 0; }
   .row .mark { flex:0 0 auto; display:flex; margin:0; }
   .row .mark button { border:0; cursor:pointer; width:34px; height:34px; border-radius:50%; font-size:15px;
                       background:var(--tertiary); color:var(--hint); }
@@ -1317,7 +1304,7 @@ const jobsBoardHTML = `<!doctype html>
   .empty { padding:14px 16px; margin:0; }
   @media (max-width: 480px) {
     main { padding:12px 10px 48px; }
-    .row { padding-left:12px; }
+    .row { padding:0 12px; }
   }
 </style>
 <main>
@@ -1341,17 +1328,31 @@ const jobsBoardHTML = `<!doctype html>
     <div class="card tile"><div class="n">{{.Rejected}}</div><div class="k">rejected</div></div>
   </div>
   {{end}}
-  {{/* The list is the page's point, so it comes right after the tiles; the
-       chart and breakdowns are the appendix. */}}
+  {{/* Design order: tiles, then the chart, then the breakdowns, then the
+       list — the dashboard reads top to bottom before the leads start. */}}
+  {{with .Dash}}
+  <div class="card panel">
+    <div class="chart">
+      {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
+    </div>
+    <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
+  </div>
+  <div class="grid">
+    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+  </div>
+  {{end}}
   <div class="card list">
   {{range .Rows}}
   <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .DupOf}} dup{{end}}">
     <a class="main" href="{{.ShowLink}}">
       <div class="top">
-        <span class="who"><span class="score">{{.Score}}</span>{{.Author}}{{if .DupCount}} <span class="tag dup">+{{.DupCount}} repeat{{if gt .DupCount 1}}s{{end}}</span>{{end}}</span>
+        <span class="score">{{.Score}}</span><span class="who">{{.Author}}</span>{{if .DupCount}}<span class="tag dup">+{{.DupCount}} repeat{{if gt .DupCount 1}}s{{end}}</span>{{end}}
         <!-- One state chip, in order of what matters: ruled out beats applied,
              and applied beats new. Stacking all three reads as noise. -->
-        <span>{{if .Rejected}}<span class="tag rejected">rejected</span>{{else}}<span class="tag applied">applied</span>{{if not .Viewed}}<span class="tag new">new</span>{{end}}{{end}}{{if .Approved}} <span class="tag approved">approved</span>{{else if .Prepped}} <span class="tag prepped">prepped</span>{{end}}{{if .HasDraft}} <span class="tag draft">draft</span>{{end}}</span>
+        {{if .Rejected}}<span class="tag rejected">rejected</span>{{else}}<span class="tag applied">applied</span>{{if not .Viewed}}<span class="tag new">new</span>{{end}}{{end}}{{if .Approved}}<span class="tag approved">approved</span>{{else if .Prepped}}<span class="tag prepped">prepped</span>{{end}}{{if .HasDraft}}<span class="tag draft">draft</span>{{end}}
       </div>
       <div class="meta">{{if .Profile}}<span class="tag who-tag">{{.Profile}}</span> {{end}}{{.Net}}{{if .Where}} · {{.Where}}{{end}}{{if .Type}} · {{.Type}}{{end}} · {{.Age}}</div>
       <div class="snippet">{{.Snippet}}</div>
@@ -1364,21 +1365,7 @@ const jobsBoardHTML = `<!doctype html>
   <p class="sub empty">no leads under this filter</p>
   {{end}}
   </div>
-  {{with .Dash}}
-  <div class="card panel">
-    <div class="chart">
-      {{range .Days}}<div class="col" title="{{.Title}}"><span class="bar" style="height:{{.Pct}}%"></span></div>{{end}}
-    </div>
-    <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
-  </div>
   ` + chartTip + `
-  <div class="grid">
-    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-    {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
-  </div>
-  {{end}}
 </main>
 ` + themeJS + markJS
 
@@ -1574,15 +1561,14 @@ const jobShowHTML = `<!doctype html>
 <style>` + sharedCSS + `
   .back { font-size:17px; font-weight:600; }
   .head { padding:16px; }
-  h1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:20px; line-height:24px; font-weight:700; margin:0; }
+  h1 { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:20px; line-height:24px; font-weight:700; margin:0; }
   h1 .score { font-size:15px; border-radius:8px; padding:2px 9px; margin:0; }
-  /* One status chip on its own row under the title, picked by the classes on
-     <main> so the async toggles (applied, approved) move it without a reload.
-     Priority: ruled out beats applied, applied beats approved, approved beats
-     needing review. Its own row because a chip pushed right of a long title
-     wraps into a lone right-aligned island. */
-  .st-row { margin-top:8px; }
-  .st { display:none; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
+  /* One status chip pushed to the right of the title row, picked by the
+     classes on <main> so the async toggles (applied, approved) move it without
+     a reload. Priority: ruled out beats applied, applied beats approved,
+     approved beats needing review. Under a long title it wraps to its own
+     line and margin-left keeps it on the right edge. */
+  .st { display:none; margin-left:auto; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
   main.rejected .st-rejected { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
   main:not(.rejected).applied .st-applied { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
   main:not(.rejected):not(.applied).approved .st-approved { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
@@ -1590,6 +1576,9 @@ const jobShowHTML = `<!doctype html>
   main:not(.rejected):not(.applied):not(.approved):not(.prepped) .st-none { display:inline-block; background:var(--tertiary); color:var(--hint); }
   .meta { color:var(--hint); font-size:13px; line-height:20px; margin-top:8px; }
   .meta .tag { margin:0 2px 0 0; }
+  /* On the lead page the profile tag is accent-tinted; the gray face stays on
+     the board, where every row would otherwise shout. */
+  .meta .tag.who-tag { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
   .btn { display:inline-block; border:0; cursor:pointer; font-size:15px; font-weight:600; border-radius:10px; padding:9px 14px;
          background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); }
@@ -1673,8 +1662,7 @@ const jobShowHTML = `<!doctype html>
     ` + themeSeg + `
   </div>
   <div class="card head">
-    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span></h1>
-    <div class="st-row"><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></div>
+    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></h1>
     <div class="meta">{{with .J.Profile}}<span class="tag who-tag">{{.}}</span> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}</div>
     <div class="actions">
       <a class="btn" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
