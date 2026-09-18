@@ -18,13 +18,25 @@ re-running a sweep refreshes scores without duplicating rows or resetting
 what you've already read. Each lead then walks a pipeline that lives in
 columns on its own row:
 
-- **found** → scored, with a mandatory `score_reason` (a bare `8` is not a
-  judgement anyone can re-read a week later)
-- **prepped** → an agent attaches a review artifact: summary, fit, what the
-  application form asks, open questions, a tailored-CV link
-- **approved** → the human gate; nothing gets applied to without it
-- **applied / rejected** → rejections require a written reason, applications
-  keep their date
+- **to-prep** → found and scored, with a mandatory `score_reason` (a bare `8`
+  is not a judgement anyone can re-read a week later)
+- **to-review** → an agent attached the review artifact: summary, fit, what
+  the application form asks, open questions, a tailored-CV link
+- **approved / rejected** → the human gate, one click each on the lead's own
+  page; nothing gets applied to without an approval, and rejections require a
+  written reason
+- **applied** → the application is out and monitoring takes over
+
+Every lead carries the derived `status` field in JSON — `to-prep`,
+`to-review`, `approved`, `applied`, `rejected`, `hired` — so an agent and the
+board always read the same ladder.
+
+Once applied, the lead's page grows an **application** section on top: where
+the application stands (`in_process` → `rejected` / `hired`), when its
+progress was last checked, and an append-only timeline of everything that
+happened — emails, DMs, status changes — newest first. Monitoring agents feed
+it through the API: push an event when the inbox held something, stamp
+`/checked` when it held nothing, and both move the "last checked" clock.
 
 The board is shared by any number of seekers via `profile`, filters compose
 through query params (`?profile=&net=&type=&new=1&approved=1&since=7d…`), and
@@ -100,13 +112,18 @@ row id or a `dedupe_key`.
 | `POST /api/jobs/{id}/approved` | Clear for applying (`{"approved":false}` undoes) |
 | `POST /api/jobs/{id}/prep` | Attach the review artifact (opaque JSON; empty clears) |
 | `POST /api/jobs/{id}/duplicate` | Link a repost to its canonical row (`{"of":"…"}`) |
+| `POST /api/jobs/{id}/appstatus` | Where the sent application stands: `{"status":"in_process"\|"rejected"\|"hired"}`; a change writes its own timeline event |
+| `POST /api/jobs/{id}/events` | Append to the application timeline: `{"kind":"email","note":"…","at":"RFC3339?"}`; also stamps `checked_at` |
+| `GET /api/jobs/{id}/events` | The timeline, newest first |
+| `POST /api/jobs/{id}/checked` | "Checked, nothing new" — moves `checked_at` and nothing else |
 | `POST /api/jobs/{id}/profiles` | Share the lead with another seeker (`{"profile":"polina"}`; `{"linked":false}` unshares, the owner cannot be unlinked) |
 | `GET /api/profiles` | Every seeker, with description and lead count |
 | `GET /api/profiles/{slug}` | One seeker |
 | `POST /api/profiles` | Write a description (`{"slug":"sergey","conditions":"…"}`); non-empty fields win, like a lead push |
 | `DELETE /api/jobs`, `DELETE /api/jobs/{id}` | Purge everything / delete one lead |
 
-The board's own buttons (approve, applied, notes) post with the page's link
+The board's own buttons (approve, reject, applied, application status, notes)
+post with the page's link
 key instead of the API token, so the review works from a phone. That includes
 `POST /jobs/{id}/voice`: the composer records a voice note in the browser,
 posts the audio there, and the ElevenLabs transcript is saved as the review

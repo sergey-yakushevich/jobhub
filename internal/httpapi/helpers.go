@@ -230,7 +230,8 @@ const sharedCSS = `
          white-space:nowrap; display:inline-block; vertical-align:middle; }
   .tag.new { background:var(--accent); color:#FFFFFF; }
   .tag.applied, .tag.approved { background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
-  .tag.rejected { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  .tag.rejected, .tag.apprej { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  .tag.hired { background:var(--ok); color:#FFFFFF; }
   .tag.prepped, .tag.draft { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .tag.dup { background:none; border:1px solid var(--divider); color:var(--hint); }
   .tag.who-tag { background:var(--tertiary); color:var(--hint); border-radius:5px; padding:0 6px; }

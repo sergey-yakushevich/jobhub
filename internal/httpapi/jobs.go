@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -497,8 +498,17 @@ func jobFilterFromQuery(q url.Values) store.JobFilter {
 		// `?approved=1&applied=0&rejected=0` is the apply stage's work queue and
 		// `?prepped=0` is the prep stage's, which keeps both of them pointed at a
 		// board URL rather than a list somebody had to assemble.
-		Approved:   tri(q.Get("approved")),
-		Prepped:    tri(q.Get("prepped")),
+		Approved: tri(q.Get("approved")),
+		Prepped:  tri(q.Get("prepped")),
+		// ?app= narrows by where the sent application stands. Unknown values
+		// mean "all" rather than an error, like every other filter param.
+		AppStatus: func() string {
+			v, err := store.NormalizeAppStatus(q.Get("app"))
+			if err != nil {
+				return ""
+			}
+			return v
+		}(),
 		Duplicates: tri(q.Get("dups")),
 		Since:      parseSince(q.Get("since")),
 		// The dedupe pass reads the whole board history in one call, so an
@@ -660,6 +670,19 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		VoiceLink: voiceLink,
 		NotesLink: fmt.Sprintf("%s/jobs/%d/notes?k=%s",
 			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID))),
+
+		AppState:    job.AppState(),
+		InProcess:   job.AppState() == store.AppInProcess,
+		Hired:       job.Hired(),
+		AppRejected: job.AppRejected(),
+		Checked:     job.Checked(),
+		CheckedAt:   job.CheckedAt,
+		AppStatusLink: fmt.Sprintf("%s/jobs/%d/appstatus?k=%s&back=%s",
+			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID)),
+			url.QueryEscape(s.BasePath+r.URL.RequestURI())),
+		RejectLink: fmt.Sprintf("%s/jobs/%d/rejected?k=%s&back=%s",
+			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID)),
+			url.QueryEscape(s.BasePath+r.URL.RequestURI())),
 		// Every board this lead is on, owner first. On a lead nobody has shared
 		// it is the one tag the page always had; on a shared one it is how the
 		// reader sees that somebody else is working the same posting.
@@ -691,6 +714,13 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	// A failed events read costs the timeline its recorded rows, not the page:
+	// the milestones stamped on the lead itself still render.
+	events, err := s.Store.JobEvents(job.ID)
+	if err != nil {
+		log.Printf("[jobs] events of %d: %v", job.ID, err)
+	}
+	data.Timeline = jobTimeline(job, events)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := jobShowTmpl.Execute(w, data); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)
@@ -765,6 +795,11 @@ type jobRowView struct {
 	Viewed   bool
 	Applied  bool
 	Rejected bool
+	// Hired and AppRej surface where a sent application landed. They read
+	// louder than plain applied: an answered application is news, an
+	// unanswered one is a wait.
+	Hired  bool
+	AppRej bool
 	// Approved marks a lead that has cleared review and is waiting to go out,
 	// and Prepped one whose review artifact is ready to read. Both matter most
 	// in their gap: prepped-but-not-approved is the reading queue, and
@@ -845,6 +880,8 @@ func (s *Server) jobRows(jobs []store.Job, now time.Time, back string, showProfi
 			Viewed:    j.Viewed(),
 			Applied:   j.Applied(),
 			Rejected:  j.Rejected(),
+			Hired:     j.Hired(),
+			AppRej:    j.AppRejected(),
 			Approved:  j.Approved(),
 			Prepped:   j.Prepped(),
 			DupOf:     j.DuplicateOf,
@@ -911,7 +948,7 @@ func (s *Server) jobsLink(f store.JobFilter, since string) string {
 	for k, v := range map[string]string{
 		"profile": f.Profile, "net": f.Network, "type": f.JobType, "since": since,
 		"applied": f.Applied, "rejected": f.Rejected, "dups": f.Duplicates,
-		"approved": f.Approved, "prepped": f.Prepped} {
+		"approved": f.Approved, "prepped": f.Prepped, "app": f.AppStatus} {
 		if v != "" {
 			q.Set(k, v)
 		}
@@ -1006,6 +1043,16 @@ func (s *Server) jobChips(f store.JobFilter, profiles []string) []chipGroup {
 			{Label: "approved", On: f.Approved == "1",
 				Link: with(func(n *store.JobFilter, _ *string) { n.Approved = toggle(f.Approved, "1") })},
 		}},
+		// The post-apply funnel: applications waiting for an answer, and the
+		// two ways one gets answered.
+		chipGroup{Name: "application", Chips: []chipView{
+			{Label: "in process", On: f.AppStatus == store.AppInProcess,
+				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppInProcess) })},
+			{Label: "rejected", On: f.AppStatus == store.AppRejected,
+				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppRejected) })},
+			{Label: "hired", On: f.AppStatus == store.AppHired,
+				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppHired) })},
+		}},
 	)
 	// Network, type and duplicates stay filterable by URL, but earn no chips:
 	// the breakdown cards already answer "where do leads come from", and rows
@@ -1084,6 +1131,8 @@ type jobsDashView struct {
 	// The two pipeline queues: waiting to be read, and waiting to be sent.
 	ToReview   int64
 	ToSend     int64
+	InProcess  int64
+	Hired      int64
 	Duplicates int64
 	// Roles is Total minus Duplicates: distinct openings rather than postings.
 	Roles     int64
@@ -1132,7 +1181,7 @@ func (s *Server) buildJobsDash(st *store.JobStats, _ store.JobFilter) *jobsDashV
 	}
 	dash := &jobsDashView{
 		Total: st.Total, Unviewed: st.Unviewed, Applied: st.Applied, Rejected: st.Rejected,
-		ToReview: st.ToReview, ToSend: st.ToSend,
+		ToReview: st.ToReview, ToSend: st.ToSend, InProcess: st.InProcess, Hired: st.Hired,
 		Duplicates: st.Duplicates, Roles: st.Total - st.Duplicates,
 		Last24h: st.Last24h, ViewedPct: viewedPct,
 		Days: days, Cadence: cadence,
@@ -1168,6 +1217,21 @@ type jobShowData struct {
 	Applied   bool
 	AppliedAt time.Time
 	Age       string
+	// The application-progress block: where the sent application stands, when
+	// somebody last checked on it, and everything that has happened, newest
+	// first. AppState is empty until an application goes out, which is what
+	// hides the whole section before then.
+	AppState    string
+	InProcess   bool
+	Hired       bool
+	AppRejected bool
+	Checked     bool
+	CheckedAt   time.Time
+	Timeline    []timelineView
+	// AppStatusLink moves the funnel from the page's own buttons; RejectLink
+	// is the reject half of the review gate.
+	AppStatusLink string
+	RejectLink    string
 	// Profiles is every board this lead is on: the owner first, then anyone it
 	// has been shared with. The lead belongs to one hunt and can be read by
 	// several, which is the whole difference the join table makes.
@@ -1273,6 +1337,58 @@ type dupRefView struct {
 	Link  string
 }
 
+// timelineView is one row of the application-progress timeline: recorded
+// events and the row's own milestones (found, approved, applied, ruled out)
+// merged into one list, newest first. Tone picks the kind chip's color.
+type timelineView struct {
+	When time.Time
+	Kind string
+	Note string
+	Tone string // "ok", "bad", "accent" or "" for the neutral face
+}
+
+// eventTone maps an event kind to the color it reads in. Unknown kinds stay
+// neutral — the timeline accepts any kind, so color is a hint, not a schema.
+func eventTone(kind string) string {
+	switch kind {
+	case "applied", "approved", "hired":
+		return "ok"
+	case "rejected":
+		return "bad"
+	case "email", "dm", "status", "interview", "reply":
+		return "accent"
+	}
+	return ""
+}
+
+// jobTimeline merges the lead's stored events with the milestones already
+// stamped on the row itself, so the timeline is complete even for leads whose
+// history predates the events table. Newest first — the page reads downward
+// into the past.
+func jobTimeline(j *store.Job, events []store.JobEvent) []timelineView {
+	var out []timelineView
+	for _, e := range events {
+		kind := e.Kind
+		if kind == "" {
+			kind = "note"
+		}
+		out = append(out, timelineView{When: e.HappenedAt, Kind: kind, Note: e.Note, Tone: eventTone(kind)})
+	}
+	add := func(t time.Time, kind, note string) {
+		if !t.IsZero() {
+			out = append(out, timelineView{When: t, Kind: kind, Note: note, Tone: eventTone(kind)})
+		}
+	}
+	// Milestones go in reverse workflow order: the sort below is stable, so
+	// two moments in the same second still render latest-stage first.
+	add(j.RejectedAt, "rejected", j.RejectReason)
+	add(j.AppliedAt, "applied", "")
+	add(j.ApprovedAt, "approved", j.ReviewNotes)
+	add(j.CreatedAt, "found", "")
+	sort.SliceStable(out, func(a, b int) bool { return out[a].When.After(out[b].When) })
+	return out
+}
+
 var jobsBoardTmpl = template.Must(template.New("jobs").Funcs(pageFuncs).Parse(jobsBoardHTML))
 var jobShowTmpl = template.Must(template.New("job").Funcs(pageFuncs).Parse(jobShowHTML))
 
@@ -1316,6 +1432,10 @@ const jobsBoardHTML = `<!doctype html>
      need from across the list, even if an application already went out. */
   .row.rejected { opacity:1; background:color-mix(in srgb, var(--bad) 7%, transparent); box-shadow:inset 3px 0 var(--bad); }
   .row.rejected .snippet { color:color-mix(in srgb, var(--bad) 60%, var(--text)); }
+  /* Answered applications outrank everything: hired is the loudest row on the
+     board, and a turned-down one reads red however it got there. */
+  .row.apprej { opacity:1; background:color-mix(in srgb, var(--bad) 7%, transparent); box-shadow:inset 3px 0 var(--bad); }
+  .row.hired { opacity:1; background:color-mix(in srgb, var(--ok) 12%, transparent); box-shadow:inset 3px 0 var(--ok); }
   .row .main { flex:1 1 auto; min-width:0; padding:12px 0; color:inherit; display:block; }
   .row .main:hover { text-decoration:none; }
   /* Tags ride next to the author with the row's own gap — the design keeps
@@ -1353,17 +1473,18 @@ const jobsBoardHTML = `<!doctype html>
   <div class="filters">
     {{range .Chips}}<span class="g">{{if .Link}}<a href="{{.Link}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</span><div class="cs">{{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{.Label}}</a>{{end}}</div>{{end}}
   </div>
-  {{/* Six tiles, one per decision state — an even grid instead of a ragged
-       6+3 wrap. The pulse numbers (last 24h, worked through, repeats) moved
-       into the subtitle. */}}
+  {{/* One tile per workflow state, the funnel in reading order: found, read,
+       reviewed, sent, answered. The pulse numbers (last 24h, worked through,
+       repeats) live in the subtitle. */}}
   {{with .Dash}}
   <div class="tiles">
     <div class="card tile"><div class="n">{{.Total}}</div><div class="k">leads</div></div>
     <div class="card tile"><div class="n">{{.Unviewed}}</div><div class="k">not viewed</div></div>
     <div class="card tile"><div class="n">{{.ToReview}}</div><div class="k">to review</div></div>
     <div class="card tile"><div class="n">{{.ToSend}}</div><div class="k">to send</div></div>
-    <div class="card tile"><div class="n">{{.Applied}}</div><div class="k">applied</div></div>
+    <div class="card tile"><div class="n">{{.InProcess}}</div><div class="k">in process</div></div>
     <div class="card tile"><div class="n">{{.Rejected}}</div><div class="k">rejected</div></div>
+    <div class="card tile"><div class="n">{{.Hired}}</div><div class="k">hired</div></div>
   </div>
   {{end}}
   {{/* Design order: tiles, then the chart, then the breakdowns, then the
@@ -1384,13 +1505,14 @@ const jobsBoardHTML = `<!doctype html>
   {{end}}
   <div class="card list">
   {{range .Rows}}
-  <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .DupOf}} dup{{end}}">
+  <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .Hired}} hired{{end}}{{if .AppRej}} apprej{{end}}{{if .DupOf}} dup{{end}}">
     <a class="main" href="{{.ShowLink}}">
       <div class="top">
         <span class="score">{{.Score}}</span><span class="who">{{.Author}}</span>{{if .DupCount}}<span class="tag dup">+{{.DupCount}} repeat{{if gt .DupCount 1}}s{{end}}</span>{{end}}
-        <!-- One state chip, in order of what matters: ruled out beats applied,
-             and applied beats new. Stacking all three reads as noise. -->
-        {{if .Rejected}}<span class="tag rejected">rejected</span>{{else}}<span class="tag applied">applied</span>{{if not .Viewed}}<span class="tag new">new</span>{{end}}{{end}}{{if .Approved}}<span class="tag approved">approved</span>{{else if .Prepped}}<span class="tag prepped">prepped</span>{{end}}{{if .HasDraft}}<span class="tag draft">draft</span>{{end}}
+        <!-- One state chip, in order of what matters: an answered application
+             (hired / turned down) beats ruled out, ruled out beats applied,
+             and applied beats new. Stacking them all reads as noise. -->
+        {{if .Hired}}<span class="tag hired">hired</span>{{else if .AppRej}}<span class="tag apprej">turned down</span>{{else if .Rejected}}<span class="tag rejected">rejected</span>{{else}}<span class="tag applied">applied</span>{{if not .Viewed}}<span class="tag new">new</span>{{end}}{{end}}{{if .Approved}}<span class="tag approved">approved</span>{{else if .Prepped}}<span class="tag prepped">prepped</span>{{end}}{{if .HasDraft}}<span class="tag draft">draft</span>{{end}}
       </div>
       <div class="meta">{{if .Profile}}<span class="tag who-tag">{{.Profile}}</span> {{end}}{{.Net}}{{if .Where}} · {{.Where}}{{end}}{{if .Type}} · {{.Type}}{{end}} · {{.Age}}</div>
       <div class="snippet">{{.Snippet}}</div>
@@ -1584,6 +1706,28 @@ const gateJS = `<script>
   // click that approves with no note at all.
   var skip = f.querySelector('.gc-skip')
   if (skip) skip.addEventListener('click', function () { doSend(false) })
+  // The reject half of the gate. A rejection must carry a reason, and the
+  // reason is whatever sits in the pill — so an empty pill just complains.
+  // The page reloads on success: rejecting redraws too much to patch in place.
+  var rej = f.querySelector('.gc-noreject')
+  if (rej) rej.addEventListener('click', function () {
+    var reason = input.value.trim()
+    if (!reason) {
+      errEl.textContent = 'a rejection needs a reason — type it in the note field first'
+      input.focus()
+      return
+    }
+    errEl.textContent = ''
+    rej.disabled = true
+    fetch(f.dataset.reject, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' },
+      body: new URLSearchParams({ reason: reason })
+    })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() })
+      .then(function () { location.reload() })
+      .catch(function () { errEl.textContent = 'rejecting failed — try again'; rej.disabled = false })
+  })
   f.addEventListener('submit', function (e) {
     e.preventDefault()
     if (state === 'idle' && !input.value.trim()) { start(); return }
@@ -1607,11 +1751,15 @@ const jobShowHTML = `<!doctype html>
      approved beats needing review. Under a long title it wraps to its own
      line and margin-left keeps it on the right edge. */
   .st { display:none; margin-left:auto; font-size:13px; font-weight:600; border-radius:999px; padding:4px 12px; white-space:nowrap; }
-  main.rejected .st-rejected { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
-  main:not(.rejected).applied .st-applied { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
-  main:not(.rejected):not(.applied).approved .st-approved { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
-  main:not(.rejected):not(.applied):not(.approved).prepped .st-review { display:inline-block; background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
-  main:not(.rejected):not(.applied):not(.approved):not(.prepped) .st-none { display:inline-block; background:var(--tertiary); color:var(--hint); }
+  /* The ladder mirrors the derived status: outcomes first (hired, then either
+     kind of rejection), then applied, then the review states. */
+  main.hired .st-hired { display:inline-block; background:var(--ok); color:#FFFFFF; }
+  main:not(.hired).apprej .st-apprej { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  main:not(.hired):not(.apprej).rejected .st-rejected { display:inline-block; background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  main:not(.hired):not(.apprej):not(.rejected).applied .st-applied { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  main:not(.hired):not(.apprej):not(.rejected):not(.applied).approved .st-approved { display:inline-block; background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  main:not(.hired):not(.apprej):not(.rejected):not(.applied):not(.approved).prepped .st-review { display:inline-block; background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  main:not(.hired):not(.apprej):not(.rejected):not(.applied):not(.approved):not(.prepped) .st-none { display:inline-block; background:var(--tertiary); color:var(--hint); }
   .meta { color:var(--hint); font-size:13px; line-height:20px; margin-top:8px; }
   .meta .tag { margin:0 2px 0 0; }
   /* On the lead page the profile tag is accent-tinted; the gray face stays on
@@ -1701,16 +1849,47 @@ const jobShowHTML = `<!doctype html>
   .gate-note { background:var(--input); border-radius:12px; padding:10px 14px; margin-top:12px; white-space:pre-wrap; word-break:break-word; }
   .gate-note:empty { display:none; }
   .withdraw { background:none; border:0; color:var(--bad); font-size:13px; cursor:pointer; padding:0; margin-top:12px; }
+  /* The reject half of the gate: a quiet red text action under the composer,
+     mirroring "approve without a note" on the other side. */
+  .gc-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .gc-noreject { background:none; border:0; color:var(--bad); font-size:13px; font-weight:600; cursor:pointer; padding:10px 6px 0; margin-left:auto; }
+  .gc-noreject:hover { text-decoration:underline; }
+  .unreject { background:none; border:0; color:var(--accent); font-size:13px; cursor:pointer; padding:0; margin-top:12px; }
+  /* The application-progress card: status row on top, timeline under it. */
+  .app-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .app-pill { font-size:14px; font-weight:600; border-radius:999px; padding:5px 14px; }
+  .app-pill.inprocess { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  .app-pill.hired { background:var(--ok); color:#FFFFFF; }
+  .app-pill.apprej { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  .app-checked { color:var(--hint); font-size:13px; margin-left:auto; }
+  .app-set { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
+  .app-set form { margin:0; }
+  .app-set button { border:0; cursor:pointer; background:var(--tertiary); color:var(--hint);
+                    font-size:13px; font-weight:600; border-radius:999px; padding:6px 13px; }
+  .app-set button:hover { color:var(--text); }
+  .app-set form.cur button { background:var(--accent); color:#FFFFFF; cursor:default; }
+  .tl { margin-top:14px; }
+  .tl-row { display:flex; align-items:baseline; gap:10px; padding:9px 0; border-bottom:1px solid var(--divider); }
+  .tl-row:first-child { padding-top:0; }
+  .tl-row:last-child { border-bottom:0; padding-bottom:0; }
+  .tl-when { color:var(--hint); font-size:13px; white-space:nowrap; flex:0 0 auto; min-width:96px; }
+  .tl-kind { font-size:12px; font-weight:600; border-radius:999px; padding:2px 10px; white-space:nowrap; flex:0 0 auto;
+             background:var(--tertiary); color:var(--hint); }
+  .tl-kind.ok { background:color-mix(in srgb, var(--ok) 14%, transparent); color:var(--ok); }
+  .tl-kind.bad { background:color-mix(in srgb, var(--bad) 14%, transparent); color:var(--bad); }
+  .tl-kind.accent { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  .tl-note { word-break:break-word; min-width:0; }
+  .tl-note:empty { display:none; }
   @media (max-width: 480px) { main { padding:12px 10px 48px; } }
 </style>
-<main class="{{if .Applied}}applied {{end}}{{if .Approved}}approved {{end}}{{if .J.Rejected}}rejected {{end}}{{if .Prep}}prepped{{end}}">
+<main class="{{if .Applied}}applied {{end}}{{if .Approved}}approved {{end}}{{if .J.Rejected}}rejected {{end}}{{if .Hired}}hired {{end}}{{if .AppRejected}}apprej {{end}}{{if .Prep}}prepped{{end}}">
   <div class="top-bar">
     <a class="back" href="{{.BackTo}}">‹ Jobs</a>
     ` + themeSeg + `
   </div>
   <div class="card head">
-    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></h1>
-    <div class="meta">{{range .Profiles}}<a class="tag who-tag{{if not .Owner}} shared{{end}}" href="{{.Link}}" title="{{if .Owner}}whose hunt found this lead{{else}}shared with this board{{end}}">{{.Slug}}</a> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}</div>
+    <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-hired">hired 🎉</span><span class="st st-apprej">application rejected</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied · in process</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">to prep</span></h1>
+    <div class="meta">{{range .Profiles}}<a class="tag who-tag{{if not .Owner}} shared{{end}}" href="{{.Link}}" title="{{if .Owner}}whose hunt found this lead{{else}}shared with this board{{end}}">{{.Slug}}</a> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}{{if .Checked}} · checked {{when .CheckedAt}}{{end}}</div>
     <div class="actions">
       <a class="btn" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
       {{if .HasPostingURL}}<a class="btn" href="{{.PostingURL}}" target="_blank" rel="noopener">the real posting ↗</a>{{end}}
@@ -1718,14 +1897,36 @@ const jobShowHTML = `<!doctype html>
       <form class="mark{{if .Applied}} on{{end}}" method="post" action="{{.MarkLink}}" data-state="applied" data-mark="mark as applied" data-undo="undo applied"><button type="submit" class="btn ok">{{.MarkLabel}}</button></form>
     </div>
   </div>
-  {{if .J.Rejected}}<div class="sec">ruled out {{when .J.RejectedAt}}</div><div class="card box bad"><div class="body">{{.J.RejectReason}}</div></div>{{end}}
+  {{/* Application progress rides on top: once an application is out, where it
+       stands and what has happened since are the newest facts on the page —
+       and the page reads newest to oldest. */}}
+  {{if .AppState}}
+  <div class="sec">application</div>
+  <div class="card box">
+    <div class="app-row">
+      {{if .Hired}}<span class="app-pill hired">hired 🎉</span>{{else if .AppRejected}}<span class="app-pill apprej">rejected</span>{{else}}<span class="app-pill inprocess">in process</span>{{end}}
+      <span class="app-checked">{{if .Checked}}last checked {{when .CheckedAt}}{{else}}not checked yet{{end}}</span>
+    </div>
+    <div class="app-set">
+      <form method="post" action="{{.AppStatusLink}}"{{if .InProcess}} class="cur"{{end}}><input type="hidden" name="status" value="in_process"><button type="submit">in process</button></form>
+      <form method="post" action="{{.AppStatusLink}}"{{if .AppRejected}} class="cur"{{end}}><input type="hidden" name="status" value="rejected"><button type="submit">rejected</button></form>
+      <form method="post" action="{{.AppStatusLink}}"{{if .Hired}} class="cur"{{end}}><input type="hidden" name="status" value="hired"><button type="submit">hired</button></form>
+    </div>
+    {{if .Timeline}}
+    <div class="tl">
+      {{range .Timeline}}<div class="tl-row"><span class="tl-when">{{when .When}}</span><span class="tl-kind{{with .Tone}} {{.}}{{end}}">{{.Kind}}</span><div class="tl-note">{{.Note}}</div></div>{{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+  {{if .J.Rejected}}<div class="sec">ruled out {{when .J.RejectedAt}}</div><div class="card box bad"><div class="body">{{.J.RejectReason}}</div><form class="mark" method="post" action="{{.RejectLink}}" data-state="rejected" data-mark="put back in play" data-undo="put back in play"><button type="submit" class="unreject">put back in play</button></form></div>{{end}}
   {{if .DupOf}}<div class="sec">repeat</div><div class="card box"><div class="body">Same role as <a href="{{.DupLink}}">lead #{{.DupOf}}</a>. Work that one.</div></div>{{end}}
   {{if .Repeats}}<div class="sec">also posted as</div><div class="card box">{{range .Repeats}}<div><a href="{{.Link}}">#{{.ID}} · {{.Label}}</a></div>{{end}}</div>{{end}}
   {{/* The review gate: one composer, one send. Sending approves; the note in
        the pill rides along (empty is fine). The mic face starts the voice-note
        preview — the recording UI is real, the audio is not kept yet. */}}
-  <div class="sec">approve for applying</div>
-  <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}"{{if .VoiceLink}} data-voice="{{.VoiceLink}}"{{end}}>
+  <div class="sec">approve or reject</div>
+  <form id="gate" class="mark gate-toggle gate-compose card{{if .ReviewNotes}} txt{{end}}" method="post" action="{{.ApproveLink}}"{{if .VoiceLink}} data-voice="{{.VoiceLink}}"{{end}} data-reject="{{.RejectLink}}">
     <div class="gc-err"></div>
     <div class="gc-row">
       <button type="button" class="gc-trash" title="delete recording"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3.5 6h13l-.95 11.4a1.8 1.8 0 0 1-1.8 1.6H8.25a1.8 1.8 0 0 1-1.8-1.6L5.5 9zm4.4 2.2.35 8h1.5l-.35-8h-1.5zm4.7 0-.35 8h1.5l.35-8h-1.5z"></path></svg></button>
@@ -1744,7 +1945,10 @@ const jobShowHTML = `<!doctype html>
         <svg class="fly" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 21.5l19-9.5-19-9.5-.01 7.5L15.5 12 2.49 14z"></path></svg>
       </button>
     </div>
-    <button type="button" class="gc-skip">approve without a note</button>
+    <div class="gc-foot">
+      <button type="button" class="gc-skip">approve without a note</button>
+      <button type="button" class="gc-noreject" title="rejecting needs a reason — the note field carries it">reject</button>
+    </div>
   </form>
   <div class="card gate-done">
     <div><span class="ok-pill">✓ approved · ready to apply</span><span class="gd-when">{{if .Approved}}approved {{when .ApprovedAt}}{{end}}</span></div>

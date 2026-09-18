@@ -49,6 +49,12 @@ func New(st *store.Store, apiToken, viewKey string) *Server {
 	mux.Handle("POST /api/jobs/{id}/approved", s.auth(http.HandlerFunc(s.handleJobApproved)))
 	mux.Handle("POST /api/jobs/{id}/prep", s.auth(http.HandlerFunc(s.handleJobPrep)))
 	mux.Handle("POST /api/jobs/{id}/duplicate", s.auth(http.HandlerFunc(s.handleJobDuplicate)))
+	// Application monitoring: the timeline, the funnel status, and the "we
+	// just checked, nothing new" stamp.
+	mux.Handle("POST /api/jobs/{id}/events", s.auth(http.HandlerFunc(s.handleJobEventAdd)))
+	mux.Handle("GET /api/jobs/{id}/events", s.auth(http.HandlerFunc(s.handleJobEventsList)))
+	mux.Handle("POST /api/jobs/{id}/appstatus", s.auth(http.HandlerFunc(s.handleJobAppStatus)))
+	mux.Handle("POST /api/jobs/{id}/checked", s.auth(http.HandlerFunc(s.handleJobChecked)))
 	// The many-to-many: one lead shared with a second seeker's board.
 	mux.Handle("POST /api/jobs/{id}/profiles", s.auth(http.HandlerFunc(s.handleJobProfiles)))
 	mux.Handle("GET /api/profiles", s.auth(http.HandlerFunc(s.handleProfilesJSON)))
@@ -63,6 +69,8 @@ func New(st *store.Store, apiToken, viewKey string) *Server {
 	mux.HandleFunc("GET /jobs/{id}/go", s.handleJobGo)
 	mux.HandleFunc("POST /jobs/{id}/applied", s.handleJobAppliedToggle)
 	mux.HandleFunc("POST /jobs/{id}/approved", s.handleJobApproveToggle)
+	mux.HandleFunc("POST /jobs/{id}/rejected", s.handleJobRejectToggle)
+	mux.HandleFunc("POST /jobs/{id}/appstatus", s.handleJobAppStatusForm)
 	mux.HandleFunc("POST /jobs/{id}/notes", s.handleJobNotes)
 	mux.HandleFunc("POST /jobs/{id}/voice", s.handleJobVoice)
 	s.mux = mux

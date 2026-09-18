@@ -52,6 +52,21 @@ type Job struct {
 	PostedAt  time.Time `json:"posted_at,omitzero"`
 	ViewedAt  time.Time `json:"viewed_at,omitzero"`
 	AppliedAt time.Time `json:"applied_at,omitzero"`
+	// AppStatus is where the SENT application stands: in_process, rejected or
+	// hired. Empty means no explicit status — which on an applied lead reads as
+	// in process (see AppState). Distinct from RejectedAt, which rules the LEAD
+	// out before anything is sent: "they turned us down" and "we ruled it out"
+	// are different facts and filter differently.
+	AppStatus string `json:"app_status,omitempty"`
+	// CheckedAt is when the application's progress was last looked at — inbox,
+	// DMs, the ATS portal. It moves on every check, even one that found
+	// nothing, because "nothing new as of yesterday" is the answer the board
+	// exists to give.
+	CheckedAt time.Time `json:"checked_at,omitzero"`
+	// Status is the one word the whole workflow collapses to, derived on read:
+	// to-prep → to-review → approved → applied → rejected/hired. Serialized so
+	// agents read the same ladder the pages show.
+	Status string `json:"status"`
 	// ApprovedAt is the human gate between prep and applying, and ReviewNotes is
 	// what was said while passing it. Unlike a rejection, notes are optional —
 	// most approvals have nothing to add, and demanding a sentence for those
@@ -95,6 +110,43 @@ func (j *Job) Approved() bool { return !j.ApprovedAt.IsZero() }
 // Prepped reports whether the prep stage has run: a CV, a summary and the
 // form's questions are waiting to be reviewed.
 func (j *Job) Prepped() bool { return j.Prep != "" }
+
+// AppState is the application's standing once one has gone out: the explicit
+// status, or in_process the moment applied_at is stamped — an unanswered
+// application IS in process, nobody has to say so. Empty before applying.
+func (j *Job) AppState() string {
+	if !j.Applied() {
+		return ""
+	}
+	if j.AppStatus != "" {
+		return j.AppStatus
+	}
+	return AppInProcess
+}
+
+func (j *Job) Hired() bool       { return j.AppStatus == AppHired }
+func (j *Job) AppRejected() bool { return j.AppStatus == AppRejected }
+func (j *Job) Checked() bool     { return !j.CheckedAt.IsZero() }
+
+// jobStatus derives the workflow ladder's one word. Outcomes outrank motion:
+// hired and rejected are final whatever else is stamped, an applied lead is
+// past its approval, and a lead nobody decided on is to-review once prep gave
+// them something to read, to-prep before.
+func jobStatus(j *Job) string {
+	switch {
+	case j.Hired():
+		return "hired"
+	case j.Rejected() || j.AppRejected():
+		return "rejected"
+	case j.Applied():
+		return "applied"
+	case j.Approved():
+		return "approved"
+	case j.Prepped():
+		return "to-review"
+	}
+	return "to-prep"
+}
 
 // JobParams is one job as the sweep sends it. DedupeKey is the network's own
 // stable id (reddit fullname, tweet id, a LinkedIn author+text hash), so the
@@ -140,6 +192,10 @@ type JobParams struct {
 	// stays worth reading after an approval is withdrawn.
 	Approved    *bool  `json:"approved"`
 	ReviewNotes string `json:"review_notes"`
+	// AppStatus follows the normal non-empty-only rule: a push that says
+	// nothing about the application leaves its standing alone. Clearing an
+	// explicit status is a per-row edit (SetJobAppStatus), not a sweep's call.
+	AppStatus string `json:"app_status"`
 }
 
 // ErrRejectReasonRequired is returned when a lead is rejected with no reason.
@@ -293,6 +349,18 @@ CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);
 	// the index leads with profile the way idx_jobs_profile does.
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_approved ON jobs(profile, approved_at)`); err != nil {
 		return err
+	}
+	// The application-monitoring columns: where a sent application stands and
+	// when its progress was last checked. Existing rows start blank on both,
+	// which is right — an applied lead with no explicit status is in process,
+	// and nothing has been checked yet.
+	for _, col := range []string{
+		"app_status TEXT NOT NULL DEFAULT ''",
+		"checked_at TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := s.addColumn("jobs", col); err != nil {
+			return err
+		}
 	}
 	return s.backfillJobURLKeys()
 }
@@ -559,6 +627,12 @@ func (s *Store) UpsertJobs(batch []JobParams, now time.Time) (UpsertResult, erro
 		if p.Score != 0 && scoreReason == "" {
 			return res, ErrScoreReasonRequired
 		}
+		// The application status is validated on the way in: a typo'd status
+		// would otherwise sit unfilterable in the column forever.
+		appStatus, err := NormalizeAppStatus(p.AppStatus)
+		if err != nil {
+			return res, err
+		}
 
 		// Both identities are scoped to the profile: the same Reddit post can
 		// be a real lead on two people's boards, and matching across profiles
@@ -574,7 +648,7 @@ func (s *Store) UpsertJobs(batch []JobParams, now time.Time) (UpsertResult, erro
 		// Existing row by either identity. dedupe_key wins when both match
 		// different rows, since it is the more specific per-post id.
 		var id int64
-		err := tx.QueryRow(
+		err = tx.QueryRow(
 			`SELECT id FROM jobs
 			 WHERE profile = ? AND (dedupe_key = ? OR (url_key != '' AND url_key = ?))
 			 ORDER BY (dedupe_key = ?) DESC LIMIT 1`,
@@ -584,12 +658,12 @@ func (s *Store) UpsertJobs(batch []JobParams, now time.Time) (UpsertResult, erro
 INSERT INTO jobs (dedupe_key, profile, network, job_type, score, author, title, body, url, url_key,
                   subreddit, emails, signals, draft, posting_url, posting_text, score_reason,
                   prep, posted_at, applied_at,
-                  rejected_at, reject_reason, approved_at, review_notes, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  rejected_at, reject_reason, approved_at, review_notes, app_status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				p.DedupeKey, insertProfile, p.Network, p.JobType, p.Score, p.Author, p.Title, p.Body, p.URL, urlKey,
 				p.Subreddit, p.Emails, p.Signals, p.Draft, p.PostingURL, p.PostingText, scoreReason,
 				p.Prep, posted, applied,
-				rejected, reason, approved, notes, fmtTime(now))
+				rejected, reason, approved, notes, appStatus, fmtTime(now))
 			if err != nil {
 				return res, err
 			}
@@ -646,7 +720,8 @@ UPDATE jobs SET
                   WHEN 1 THEN CASE WHEN approved_at != '' THEN approved_at ELSE ? END
                   WHEN 2 THEN ''
                   ELSE approved_at END,
-  review_notes = CASE WHEN ? != '' THEN ? ELSE review_notes END
+  review_notes = CASE WHEN ? != '' THEN ? ELSE review_notes END,
+  app_status = CASE WHEN ? != '' THEN ? ELSE app_status END
 WHERE id = ?`,
 			rawProfile, rawProfile,
 			p.JobType, p.JobType, p.Score, p.Score, p.Author, p.Author, p.Title, p.Title,
@@ -655,7 +730,7 @@ WHERE id = ?`,
 			p.PostingURL, p.PostingURL, p.PostingText, p.PostingText,
 			scoreReason, scoreReason, p.Prep, p.Prep, posted, posted,
 			appliedMode, applied, rejectedMode, rejected, rejectedMode, reason,
-			approvedMode, approved, notes, notes, id); err != nil {
+			approvedMode, approved, notes, notes, appStatus, appStatus, id); err != nil {
 			return res, err
 		}
 		// insertProfile is the board this push was resolved against, and the
@@ -690,6 +765,10 @@ type JobFilter struct {
 	Applied string
 	// Rejected narrows the same way: "" = all, "1" = ruled out, "0" = still live.
 	Rejected string
+	// AppStatus narrows by where a sent application stands: "" = all,
+	// in_process / rejected / hired. in_process includes applied leads with no
+	// explicit status, since that is what an unanswered application is.
+	AppStatus string
 	// Approved narrows by the review gate: "" = all, "1" = cleared for applying,
 	// "0" = not yet. `?approved=1&applied=0&rejected=0` is the apply stage's
 	// whole input — a board URL that is also its work queue.
@@ -751,6 +830,14 @@ func (f JobFilter) where(now time.Time) (string, []any) {
 	case "0":
 		conds = append(conds, "approved_at = ''")
 	}
+	switch f.AppStatus {
+	case AppInProcess:
+		conds = append(conds, "applied_at != '' AND (app_status = '' OR app_status = 'in_process')")
+	case AppRejected:
+		conds = append(conds, "app_status = 'rejected'")
+	case AppHired:
+		conds = append(conds, "app_status = 'hired'")
+	}
 	switch f.Prepped {
 	case "1":
 		conds = append(conds, "prep != ''")
@@ -775,17 +862,21 @@ func (f JobFilter) where(now time.Time) (string, []any) {
 const jobCols = `id, dedupe_key, profile, network, job_type, score, author, title, body, url,
   subreddit, emails, signals, draft, posting_url, posting_text, score_reason, prep,
   posted_at, viewed_at, applied_at,
-  rejected_at, reject_reason, approved_at, review_notes, duplicate_of, created_at`
+  rejected_at, reject_reason, approved_at, review_notes, app_status, checked_at,
+  duplicate_of, created_at`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
-	var posted, viewed, applied, rejected, approved, created string
+	var posted, viewed, applied, rejected, approved, checked, created string
 	if err := row.Scan(&j.ID, &j.DedupeKey, &j.Profile, &j.Network, &j.JobType, &j.Score, &j.Author,
 		&j.Title, &j.Body, &j.URL, &j.Subreddit, &j.Emails, &j.Signals, &j.Draft,
 		&j.PostingURL, &j.PostingText, &j.ScoreReason, &j.Prep,
 		&posted, &viewed, &applied, &rejected, &j.RejectReason,
-		&approved, &j.ReviewNotes, &j.DuplicateOf, &created); err != nil {
+		&approved, &j.ReviewNotes, &j.AppStatus, &checked, &j.DuplicateOf, &created); err != nil {
 		return nil, err
+	}
+	if checked != "" {
+		j.CheckedAt = parseTime(checked)
 	}
 	if rejected != "" {
 		j.RejectedAt = parseTime(rejected)
@@ -803,6 +894,7 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 		j.AppliedAt = parseTime(applied)
 	}
 	j.CreatedAt = parseTime(created)
+	j.Status = jobStatus(&j)
 	return &j, nil
 }
 
@@ -1208,6 +1300,10 @@ type JobStats struct {
 	// got done, which is the opposite of what a queue should do.
 	ToReview int64
 	ToSend   int64
+	// InProcess and Hired split the applied count by outcome: applications
+	// still waiting for an answer, and the one number the whole board is for.
+	InProcess int64
+	Hired     int64
 	// Duplicates counts mirrors; Total minus Duplicates is how many distinct
 	// roles the board actually holds, which is the number worth reporting.
 	Duplicates int64
@@ -1233,12 +1329,14 @@ func (s *Store) JobStats(f JobFilter, now time.Time) (*JobStats, error) {
 		        COALESCE(SUM(CASE WHEN rejected_at != '' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN prep != '' AND approved_at = '' AND rejected_at = '' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN approved_at != '' AND applied_at = '' AND rejected_at = '' THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN applied_at != '' AND (app_status = '' OR app_status = 'in_process') THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN app_status = 'hired' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN duplicate_of != 0 THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)
 		 FROM jobs WHERE %s`, where),
 		append([]any{fmtTime(now.Add(-24 * time.Hour))}, args...)...,
 	).Scan(&st.Total, &st.Unviewed, &st.Applied, &st.Rejected,
-		&st.ToReview, &st.ToSend, &st.Duplicates, &st.Last24h); err != nil {
+		&st.ToReview, &st.ToSend, &st.InProcess, &st.Hired, &st.Duplicates, &st.Last24h); err != nil {
 		return nil, err
 	}
 
