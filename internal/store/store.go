@@ -33,8 +33,14 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// migrate runs the schema forward. Order matters: job_profiles has a foreign
+// key onto jobs and is backfilled from jobs.profile, so the jobs table has to
+// exist and be up to date before the profiles migration reads it.
 func (s *Store) migrate() error {
-	return s.migrateJobs()
+	if err := s.migrateJobs(); err != nil {
+		return err
+	}
+	return s.migrateProfiles()
 }
 
 // addColumn is an idempotent ALTER TABLE: SQLite has no "IF NOT EXISTS" for

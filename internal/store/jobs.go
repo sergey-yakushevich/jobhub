@@ -580,7 +580,7 @@ func (s *Store) UpsertJobs(batch []JobParams, now time.Time) (UpsertResult, erro
 			 ORDER BY (dedupe_key = ?) DESC LIMIT 1`,
 			insertProfile, p.DedupeKey, urlKey, p.DedupeKey).Scan(&id)
 		if err == sql.ErrNoRows {
-			if _, err := tx.Exec(`
+			ins, err := tx.Exec(`
 INSERT INTO jobs (dedupe_key, profile, network, job_type, score, author, title, body, url, url_key,
                   subreddit, emails, signals, draft, posting_url, posting_text, score_reason,
                   prep, posted_at, applied_at,
@@ -589,7 +589,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 				p.DedupeKey, insertProfile, p.Network, p.JobType, p.Score, p.Author, p.Title, p.Body, p.URL, urlKey,
 				p.Subreddit, p.Emails, p.Signals, p.Draft, p.PostingURL, p.PostingText, scoreReason,
 				p.Prep, posted, applied,
-				rejected, reason, approved, notes, fmtTime(now)); err != nil {
+				rejected, reason, approved, notes, fmtTime(now))
+			if err != nil {
+				return res, err
+			}
+			newID, err := ins.LastInsertId()
+			if err != nil {
+				return res, err
+			}
+			// The lead's owner link, written inside the same transaction as the
+			// lead: a row on the board and no row in job_profiles would be a lead
+			// that the profile page cannot see.
+			if err := setOwnerLink(tx, newID, insertProfile, now); err != nil {
 				return res, err
 			}
 			res.Added++
@@ -647,6 +658,14 @@ WHERE id = ?`,
 			approvedMode, approved, notes, notes, id); err != nil {
 			return res, err
 		}
+		// insertProfile is the board this push was resolved against, and the
+		// UPDATE above can only have written that same value (a partial push
+		// leaves the column alone), so this is the row's owner either way. It is
+		// re-stated rather than assumed: a lead that predates the join table
+		// gains its link on the next push that touches it.
+		if err := setOwnerLink(tx, id, insertProfile, now); err != nil {
+			return res, err
+		}
 		res.Updated++
 	}
 	if err := tx.Commit(); err != nil {
@@ -691,8 +710,17 @@ func (f JobFilter) where(now time.Time) (string, []any) {
 	conds := []string{"1=1"}
 	var args []any
 	if f.Profile != "" {
-		conds = append(conds, "profile = ?")
-		args = append(args, f.Profile)
+		// A lead is on a board either because that board's sweep found it — the
+		// profile column, which is still the lead's owner and its dedupe scope —
+		// or because it was shared there through job_profiles. The owner test is
+		// kept alongside the join rather than folded into it: the backfill gives
+		// every existing lead an owner link, so the two agree on today's data,
+		// and a lead written by a path that never linked stays visible to the
+		// person who owns it instead of quietly dropping off their board.
+		conds = append(conds, `(profile = ? OR EXISTS (
+			SELECT 1 FROM job_profiles jp JOIN profiles p ON p.id = jp.profile_id
+			 WHERE jp.job_id = jobs.id AND p.slug = ?))`)
+		args = append(args, f.Profile, f.Profile)
 	}
 	if f.Network != "" {
 		conds = append(conds, "network = ?")

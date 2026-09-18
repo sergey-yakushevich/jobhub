@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sergey-yakushevich/jobhub/internal/httpapi"
+	"github.com/sergey-yakushevich/jobhub/internal/seed"
 	"github.com/sergey-yakushevich/jobhub/internal/store"
 )
 
@@ -43,6 +45,15 @@ func main() {
 		log.Fatalf("open db: %v", err)
 	}
 	defer st.Close()
+
+	// The shipped profiles. Seeding only fills fields that are empty, so this
+	// is safe on every boot: a description edited through the API is never
+	// overwritten by the copy compiled into the binary.
+	if written, err := seed.Apply(st, time.Now()); err != nil {
+		log.Printf("seed profiles: %v", err)
+	} else if len(written) > 0 {
+		log.Printf("seeded profile(s): %s", strings.Join(written, ", "))
+	}
 
 	server := httpapi.New(st, apiToken, viewKey)
 	// Voice notes are optional: with a key the composer's recordings are

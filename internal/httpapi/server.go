@@ -49,6 +49,15 @@ func New(st *store.Store, apiToken, viewKey string) *Server {
 	mux.Handle("POST /api/jobs/{id}/approved", s.auth(http.HandlerFunc(s.handleJobApproved)))
 	mux.Handle("POST /api/jobs/{id}/prep", s.auth(http.HandlerFunc(s.handleJobPrep)))
 	mux.Handle("POST /api/jobs/{id}/duplicate", s.auth(http.HandlerFunc(s.handleJobDuplicate)))
+	// The many-to-many: one lead shared with a second seeker's board.
+	mux.Handle("POST /api/jobs/{id}/profiles", s.auth(http.HandlerFunc(s.handleJobProfiles)))
+	mux.Handle("GET /api/profiles", s.auth(http.HandlerFunc(s.handleProfilesJSON)))
+	mux.Handle("POST /api/profiles", s.auth(http.HandlerFunc(s.handleProfileUpsert)))
+	mux.Handle("GET /api/profiles/{slug}", s.auth(http.HandlerFunc(s.handleProfileJSON)))
+	// The profile pages take the board's key: whoever may read the board may
+	// read who it hunts for.
+	mux.HandleFunc("GET /profiles", s.handleProfilesIndex)
+	mux.HandleFunc("GET /profiles/{slug}", s.handleProfileShow)
 	mux.HandleFunc("GET /jobs", s.handleJobsBoard)
 	mux.HandleFunc("GET /jobs/{id}", s.handleJobShow)
 	mux.HandleFunc("GET /jobs/{id}/go", s.handleJobGo)

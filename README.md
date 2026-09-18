@@ -30,6 +30,14 @@ The board is shared by any number of seekers via `profile`, filters compose
 through query params (`?profile=&net=&type=&new=1&approved=1&since=7d…`), and
 every board URL is also an API call — the JSON endpoint takes the same params.
 
+Each seeker is a row in `profiles` with a description the agents can read:
+summary, skills, experience and working conditions, on a page of its own at
+`/profiles/{slug}`. Leads and profiles are many-to-many. Every lead has one
+owner — the board whose sweep found it, which is also its dedupe scope — and
+can be shared with any number of other profiles through `job_profiles`. A
+shared lead appears on both boards as **one row**: share it instead of pushing
+it twice, or two people work the same posting without either of them seeing it.
+
 ![one lead's review page](docs/lead.png)
 
 Pages are gated by short per-page keys derived from a single secret
@@ -73,6 +81,7 @@ curl -X POST localhost:8080/api/jobs -H 'Authorization: Bearer change-me' \
 | `PORT` | Listen port (default `8080`) |
 | `DEFAULT_PROFILE` | Who owns leads pushed without a `profile` (default `me`) |
 | `PROFILES` | Comma-separated seekers whose board chips exist before their first lead |
+| — | The binary ships with three described profiles (`internal/seed`). They are written on boot into empty fields only, so an edit made through `POST /api/profiles` always wins |
 | `ELEVENLABS_API_KEY` | Enables voice notes: the approve composer's recordings are transcribed and saved as the review note. Unset, recording stays an on-page preview |
 | `ELEVENLABS_STT_MODEL` | Speech-to-text model (default `scribe_v2`) |
 | `ELEVENLABS_BASE_URL` | Override the ElevenLabs endpoint (proxies, tests) |
@@ -91,6 +100,10 @@ row id or a `dedupe_key`.
 | `POST /api/jobs/{id}/approved` | Clear for applying (`{"approved":false}` undoes) |
 | `POST /api/jobs/{id}/prep` | Attach the review artifact (opaque JSON; empty clears) |
 | `POST /api/jobs/{id}/duplicate` | Link a repost to its canonical row (`{"of":"…"}`) |
+| `POST /api/jobs/{id}/profiles` | Share the lead with another seeker (`{"profile":"polina"}`; `{"linked":false}` unshares, the owner cannot be unlinked) |
+| `GET /api/profiles` | Every seeker, with description and lead count |
+| `GET /api/profiles/{slug}` | One seeker |
+| `POST /api/profiles` | Write a description (`{"slug":"sergey","conditions":"…"}`); non-empty fields win, like a lead push |
 | `DELETE /api/jobs`, `DELETE /api/jobs/{id}` | Purge everything / delete one lead |
 
 The board's own buttons (approve, applied, notes) post with the page's link

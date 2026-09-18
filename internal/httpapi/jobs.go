@@ -646,7 +646,7 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		// filter they were reading under. safeBack falls back to the plain board
 		// for a link that arrived without one (or with someone else's).
 		BackTo: s.safeBack(r.URL.Query().Get("back")),
-		DupOf:     job.DuplicateOf,
+		DupOf:  job.DuplicateOf,
 
 		Prep:        prep,
 		PrepRaw:     job.Prep,
@@ -660,6 +660,10 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		VoiceLink: voiceLink,
 		NotesLink: fmt.Sprintf("%s/jobs/%d/notes?k=%s",
 			s.BasePath, job.ID, s.LinkKey(jobScope(job.ID))),
+		// Every board this lead is on, owner first. On a lead nobody has shared
+		// it is the one tag the page always had; on a shared one it is how the
+		// reader sees that somebody else is working the same posting.
+		Profiles: s.jobProfileRefs(job.ID),
 		// The resolved posting is shown as its own link rather than replacing
 		// "open the post": the two disagreeing is the single most useful thing
 		// on this page, so both stay clickable.
@@ -865,7 +869,10 @@ type chipView struct {
 }
 
 type chipGroup struct {
-	Name  string
+	Name string
+	// Link makes the group's label a link. Only the profile row uses it: it
+	// leads to the descriptions, which is the one thing a chip cannot say.
+	Link  string
 	Chips []chipView
 }
 
@@ -957,10 +964,12 @@ func (s *Server) jobChips(f store.JobFilter, profiles []string) []chipGroup {
 	// without knowing whose leads it holds is the one confusion worth designing
 	// out. "everyone" is a real choice rather than an implicit default.
 	if len(profiles) > 1 {
-		pg := chipGroup{Name: "profile", Chips: []chipView{
-			{Label: "everyone", On: f.Profile == "",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Profile = "" })},
-		}}
+		pg := chipGroup{Name: "profile",
+			Link: fmt.Sprintf("%s/profiles?k=%s", s.BasePath, s.LinkKey(jobsScope())),
+			Chips: []chipView{
+				{Label: "everyone", On: f.Profile == "",
+					Link: with(func(n *store.JobFilter, _ *string) { n.Profile = "" })},
+			}}
 		for _, p := range profiles {
 			want := toggle(f.Profile, p)
 			pg.Chips = append(pg.Chips, chipView{Label: p, On: f.Profile == p,
@@ -1032,6 +1041,16 @@ func (s *Server) jobProfileChoices() []string {
 	}
 	for _, p := range stats {
 		add(p.Label)
+	}
+	// The profiles table comes next: a seeker described before their first
+	// sweep ran has a page and a chip, which is what makes writing the profile
+	// the first step of onboarding one rather than an afterthought.
+	profiles, err := s.Store.ListProfiles()
+	if err != nil {
+		log.Printf("[jobs] profile rows: %v", err)
+	}
+	for _, p := range profiles {
+		add(p.Slug)
 	}
 	for _, p := range knownJobProfiles {
 		add(p)
@@ -1117,7 +1136,7 @@ func (s *Server) buildJobsDash(st *store.JobStats, _ store.JobFilter) *jobsDashV
 		Duplicates: st.Duplicates, Roles: st.Total - st.Duplicates,
 		Last24h: st.Last24h, ViewedPct: viewedPct,
 		Days: days, Cadence: cadence,
-		Profiles:   plainRows(st.Profiles),
+		Profiles:   s.profileRows(st.Profiles),
 		Networks:   plainRows(st.Networks),
 		Types:      plainRows(st.Types),
 		Subreddits: plainRows(st.Subreddits),
@@ -1149,6 +1168,10 @@ type jobShowData struct {
 	Applied   bool
 	AppliedAt time.Time
 	Age       string
+	// Profiles is every board this lead is on: the owner first, then anyone it
+	// has been shared with. The lead belongs to one hunt and can be read by
+	// several, which is the whole difference the join table makes.
+	Profiles  []profileRefView
 	Emails    []string
 	Signals   []string
 	GoLink    string
@@ -1328,7 +1351,7 @@ const jobsBoardHTML = `<!doctype html>
     ` + themeSeg + `
   </div>
   <div class="filters">
-    {{range .Chips}}<span class="g">{{.Name}}</span><div class="cs">{{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{.Label}}</a>{{end}}</div>{{end}}
+    {{range .Chips}}<span class="g">{{if .Link}}<a href="{{.Link}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</span><div class="cs">{{range .Chips}}<a class="chip{{if .On}} on{{end}}" href="{{.Link}}">{{.Label}}</a>{{end}}</div>{{end}}
   </div>
   {{/* Six tiles, one per decision state — an even grid instead of a ragged
        6+3 wrap. The pulse numbers (last 24h, worked through, repeats) moved
@@ -1353,7 +1376,7 @@ const jobsBoardHTML = `<!doctype html>
     <div class="axis"><span>{{.FirstDay}}</span><span>{{.Cadence}}</span><span>{{.LastDay}}</span></div>
   </div>
   <div class="grid">
-    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
+    {{if gt (len .Profiles) 1}}<div class="card bd"><h3>profiles</h3>{{range .Profiles}}<div class="r"><span class="l">{{if .Link}}<a href="{{.Link}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
     {{if .Networks}}<div class="card bd"><h3>networks</h3>{{range .Networks}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
     {{if .Types}}<div class="card bd"><h3>types</h3>{{range .Types}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
     {{if .Subreddits}}<div class="card bd"><h3>subreddits</h3>{{range .Subreddits}}<div class="r"><span class="l">{{.Label}}</span><span class="c">{{.Count}}</span></div>{{end}}</div>{{end}}
@@ -1594,6 +1617,10 @@ const jobShowHTML = `<!doctype html>
   /* On the lead page the profile tag is accent-tinted; the gray face stays on
      the board, where every row would otherwise shout. */
   .meta .tag.who-tag { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  /* A share is a quieter fact than ownership: the board that swept the lead
+     keeps the accent, the boards it was shared with read as gray. */
+  .meta .tag.who-tag.shared { background:var(--tertiary); color:var(--hint); }
+  a.tag.who-tag:hover { text-decoration:none; opacity:.85; }
   .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
   /* Links and buttons sit side by side here, so both need the same box: a
      <button> does not inherit line-height and would otherwise come out a few
@@ -1683,7 +1710,7 @@ const jobShowHTML = `<!doctype html>
   </div>
   <div class="card head">
     <h1><span class="score">{{printf "%.1f" .J.Score}}</span><span>{{.J.Author}}</span><span class="st st-rejected">rejected</span><span class="st st-applied">✓ applied</span><span class="st st-approved">approved · ready to apply</span><span class="st st-review">prepped · needs your review</span><span class="st st-none">not reviewed yet</span></h1>
-    <div class="meta">{{with .J.Profile}}<span class="tag who-tag">{{.}}</span> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}</div>
+    <div class="meta">{{range .Profiles}}<a class="tag who-tag{{if not .Owner}} shared{{end}}" href="{{.Link}}" title="{{if .Owner}}whose hunt found this lead{{else}}shared with this board{{end}}">{{.Slug}}</a> {{end}}{{.Net}}{{with .J.Subreddit}} · r/{{.}}{{end}}{{with .J.JobType}} · {{.}}{{end}} · {{.Age}}{{if .Viewed}} · viewed {{when .ViewedAt}}{{end}}{{if .Applied}} · applied {{when .AppliedAt}}{{end}}{{if .Approved}} · approved {{when .ApprovedAt}}{{end}}</div>
     <div class="actions">
       <a class="btn" href="{{.GoLink}}" target="_blank" rel="noopener">open the post ↗</a>
       {{if .HasPostingURL}}<a class="btn" href="{{.PostingURL}}" target="_blank" rel="noopener">the real posting ↗</a>{{end}}

@@ -19,11 +19,13 @@ type dayBarView struct {
 }
 
 // statRowView is one line of a breakdown table: what it is, how often, and an
-// optional note.
+// optional note. Link turns the label into a link where the row leads
+// somewhere — the profiles card points at each seeker's page.
 type statRowView struct {
 	Label string
 	Count int64
 	Note  string
+	Link  string
 }
 
 func plainRows(rows []store.LabelStat) []statRowView {
