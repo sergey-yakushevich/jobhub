@@ -769,6 +769,13 @@ type JobFilter struct {
 	// in_process / rejected / hired. in_process includes applied leads with no
 	// explicit status, since that is what an unanswered application is.
 	AppStatus string
+	// Status narrows by the derived workflow ladder — the same word the Status
+	// field reports: to-prep, to-review, approved, applied, rejected, hired.
+	// Unlike the raw flag filters (Prepped, Approved, …) each value names a
+	// STAGE, so "to-prep" is only leads still waiting for prep, not every row
+	// that happens to lack an artifact — an applied or rejected lead has left
+	// that stage even though its prep column may be empty.
+	Status string
 	// Approved narrows by the review gate: "" = all, "1" = cleared for applying,
 	// "0" = not yet. `?approved=1&applied=0&rejected=0` is the apply stage's
 	// whole input — a board URL that is also its work queue.
@@ -832,10 +839,28 @@ func (f JobFilter) where(now time.Time) (string, []any) {
 	}
 	switch f.AppStatus {
 	case AppInProcess:
-		conds = append(conds, "applied_at != '' AND (app_status = '' OR app_status = 'in_process')")
+		// A lead ruled out after applying is off the monitoring queue: its
+		// derived status is rejected, and nobody should keep checking its inbox.
+		conds = append(conds, "applied_at != '' AND rejected_at = '' AND (app_status = '' OR app_status = 'in_process')")
 	case AppRejected:
 		conds = append(conds, "app_status = 'rejected'")
 	case AppHired:
+		conds = append(conds, "app_status = 'hired'")
+	}
+	// Each case restates jobStatus() in SQL, and the two must stay in step: the
+	// board's chips filter with this, the rows they show carry that.
+	switch f.Status {
+	case "to-prep":
+		conds = append(conds, "prep = '' AND approved_at = '' AND rejected_at = '' AND applied_at = ''")
+	case "to-review":
+		conds = append(conds, "prep != '' AND approved_at = '' AND rejected_at = '' AND applied_at = ''")
+	case "approved":
+		conds = append(conds, "approved_at != '' AND applied_at = '' AND rejected_at = ''")
+	case "applied":
+		conds = append(conds, "applied_at != '' AND rejected_at = '' AND (app_status = '' OR app_status = 'in_process')")
+	case "rejected":
+		conds = append(conds, "app_status != 'hired' AND (rejected_at != '' OR app_status = 'rejected')")
+	case "hired":
 		conds = append(conds, "app_status = 'hired'")
 	}
 	switch f.Prepped {
@@ -1326,10 +1351,10 @@ func (s *Store) JobStats(f JobFilter, now time.Time) (*JobStats, error) {
 		`SELECT COUNT(*),
 		        COALESCE(SUM(CASE WHEN viewed_at = '' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN applied_at != '' THEN 1 ELSE 0 END), 0),
-		        COALESCE(SUM(CASE WHEN rejected_at != '' THEN 1 ELSE 0 END), 0),
-		        COALESCE(SUM(CASE WHEN prep != '' AND approved_at = '' AND rejected_at = '' THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN app_status != 'hired' AND (rejected_at != '' OR app_status = 'rejected') THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN prep != '' AND approved_at = '' AND rejected_at = '' AND applied_at = '' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN approved_at != '' AND applied_at = '' AND rejected_at = '' THEN 1 ELSE 0 END), 0),
-		        COALESCE(SUM(CASE WHEN applied_at != '' AND (app_status = '' OR app_status = 'in_process') THEN 1 ELSE 0 END), 0),
+		        COALESCE(SUM(CASE WHEN applied_at != '' AND rejected_at = '' AND (app_status = '' OR app_status = 'in_process') THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN app_status = 'hired' THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN duplicate_of != 0 THEN 1 ELSE 0 END), 0),
 		        COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0)

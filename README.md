@@ -106,7 +106,7 @@ row id or a `dedupe_key`.
 | Endpoint | What it does |
 | --- | --- |
 | `POST /api/jobs` | Ingest a batch (`{"jobs":[…]}`); upserts by `dedupe_key`, non-empty fields win |
-| `GET /api/jobs` | Leads as JSON; same filter params as the board |
+| `GET /api/jobs` | Leads as JSON; same filter params as the board. `?status=` filters by the derived ladder (a STAGE — `to-prep` excludes applied/rejected rows), `?app=` by application standing; the raw flag params (`prepped=`, `approved=`, `applied=`, `rejected=`) still work |
 | `POST /api/jobs/{id}/applied` | Mark applied (`{"applied":false}` undoes) |
 | `POST /api/jobs/{id}/rejected` | Rule out: `{"reason":"…"}` required |
 | `POST /api/jobs/{id}/approved` | Clear for applying (`{"approved":false}` undoes) |

@@ -196,27 +196,46 @@ func TestPageAppStatusButtons(t *testing.T) {
 	}
 }
 
-// The board filters and counts the post-apply funnel.
-func TestBoardAppStatusChipsAndTiles(t *testing.T) {
+// The board's chips speak the derived ladder, and each one filters by STAGE:
+// "to prep" must not show applied or rejected rows just because their prep
+// column happens to be empty — that was the bug the ?status= filter replaced
+// the raw flag chips over.
+func TestBoardStatusChipsFilterByStage(t *testing.T) {
 	s, _ := testServer(t)
 	ingestJobs(t, s)
-	id := firstJobID(t, s)
+	id := firstJobID(t, s) // t3_go1, author founder1
 	request(t, s, "POST", "/api/jobs/"+itoa(id)+"/appstatus", apiToken, `{"status":"hired"}`)
+	request(t, s, "POST", "/api/jobs/li_1/rejected", apiToken, `{"reason":"US-only"}`)
 
 	req := httptest.NewRequest("GET", "/jobs?k="+s.LinkKey(jobsScope()), nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	page := rec.Body.String()
-	for _, want := range []string{">application<", ">hired<", ">in process<", `class="tag hired"`} {
+	for _, want := range []string{">status<", ">to prep<", ">to review<", ">approved<",
+		">applied<", ">rejected<", ">hired<", "status=to-prep", `class="tag hired"`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("board missing %q", want)
 		}
 	}
 
-	req = httptest.NewRequest("GET", "/jobs?k="+s.LinkKey(jobsScope())+"&app=hired", nil)
-	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
-	if body := rec.Body.String(); !strings.Contains(body, `class="tag hired"`) || strings.Contains(body, "recruiter") {
+	get := func(query string) string {
+		req := httptest.NewRequest("GET", "/jobs?k="+s.LinkKey(jobsScope())+query, nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	// Both decided leads have left the to-prep stage; nothing here is left.
+	if body := get("&status=to-prep"); strings.Contains(body, "founder1") || strings.Contains(body, "recruiter") {
+		t.Fatal("?status=to-prep leaked an applied or rejected lead")
+	}
+	if body := get("&status=hired"); !strings.Contains(body, "founder1") || strings.Contains(body, "recruiter") {
+		t.Fatal("?status=hired should list exactly the hired lead")
+	}
+	if body := get("&status=rejected"); !strings.Contains(body, "recruiter") || strings.Contains(body, "founder1") {
+		t.Fatal("?status=rejected should list exactly the ruled-out lead")
+	}
+	// The old agent-facing param still narrows the same way.
+	if body := get("&app=hired"); !strings.Contains(body, `class="tag hired"`) || strings.Contains(body, "recruiter") {
 		t.Fatal("?app=hired should list exactly the hired lead")
 	}
 }

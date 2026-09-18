@@ -509,6 +509,8 @@ func jobFilterFromQuery(q url.Values) store.JobFilter {
 			}
 			return v
 		}(),
+		// ?status= filters by the derived ladder — the board's chips speak it.
+		Status:     statusParam(q.Get("status")),
 		Duplicates: tri(q.Get("dups")),
 		Since:      parseSince(q.Get("since")),
 		// The dedupe pass reads the whole board history in one call, so an
@@ -517,6 +519,23 @@ func jobFilterFromQuery(q url.Values) store.JobFilter {
 		Limit:      atoiOr(q.Get("limit"), 0),
 		SortNewest: q.Get("sort") == "new",
 	}
+}
+
+// jobStatuses is the derived ladder in workflow order — the chip row renders
+// it, and statusParam accepts exactly it.
+var jobStatuses = []string{"to-prep", "to-review", "approved", "applied", "rejected", "hired"}
+
+// statusParam whitelists ?status=. An unknown word means "all", like every
+// other filter param; a space spelling ("to prep") is accepted because that is
+// how the chips read.
+func statusParam(v string) string {
+	v = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "-")
+	for _, s := range jobStatuses {
+		if v == s {
+			return s
+		}
+	}
+	return ""
 }
 
 func atoiOr(v string, def int) int {
@@ -948,7 +967,8 @@ func (s *Server) jobsLink(f store.JobFilter, since string) string {
 	for k, v := range map[string]string{
 		"profile": f.Profile, "net": f.Network, "type": f.JobType, "since": since,
 		"applied": f.Applied, "rejected": f.Rejected, "dups": f.Duplicates,
-		"approved": f.Approved, "prepped": f.Prepped, "app": f.AppStatus} {
+		"approved": f.Approved, "prepped": f.Prepped, "app": f.AppStatus,
+		"status": f.Status} {
 		if v != "" {
 			q.Set(k, v)
 		}
@@ -1021,39 +1041,21 @@ func (s *Server) jobChips(f store.JobFilter, profiles []string) []chipGroup {
 			{Label: "newest first", On: f.SortNewest,
 				Link: with(func(n *store.JobFilter, _ *string) { n.SortNewest = !f.SortNewest })},
 		}},
-		chipGroup{Name: "applied", Chips: []chipView{
-			{Label: "to apply", On: f.Applied == "0",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Applied = toggle(f.Applied, "0") })},
-			{Label: "applied", On: f.Applied == "1",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Applied = toggle(f.Applied, "1") })},
-		}},
-		chipGroup{Name: "status", Chips: []chipView{
-			{Label: "still live", On: f.Rejected == "0",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Rejected = toggle(f.Rejected, "0") })},
-			{Label: "rejected", On: f.Rejected == "1",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Rejected = toggle(f.Rejected, "1") })},
-		}},
-		// The two pipeline queues as one click each: what still needs reading,
-		// and what has been cleared and is waiting to go out.
-		chipGroup{Name: "pipeline", Chips: []chipView{
-			{Label: "to prep", On: f.Prepped == "0",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Prepped = toggle(f.Prepped, "0") })},
-			{Label: "to review", On: f.Prepped == "1",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Prepped = toggle(f.Prepped, "1") })},
-			{Label: "approved", On: f.Approved == "1",
-				Link: with(func(n *store.JobFilter, _ *string) { n.Approved = toggle(f.Approved, "1") })},
-		}},
-		// The post-apply funnel: applications waiting for an answer, and the
-		// two ways one gets answered.
-		chipGroup{Name: "application", Chips: []chipView{
-			{Label: "in process", On: f.AppStatus == store.AppInProcess,
-				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppInProcess) })},
-			{Label: "rejected", On: f.AppStatus == store.AppRejected,
-				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppRejected) })},
-			{Label: "hired", On: f.AppStatus == store.AppHired,
-				Link: with(func(n *store.JobFilter, _ *string) { n.AppStatus = toggle(f.AppStatus, store.AppHired) })},
-		}},
 	)
+	// One chip per rung of the derived ladder, replacing the old flag chips
+	// (applied / still live / pipeline / application). The flags overlapped —
+	// "to prep" as prepped=0 matched every applied and rejected row too, since
+	// those also lack an artifact. A stage chip means the stage: exactly the
+	// rows whose status IS that word. The raw params stay for agents and URLs.
+	statuses := chipGroup{Name: "status"}
+	for _, st := range jobStatuses {
+		want := toggle(f.Status, st)
+		statuses.Chips = append(statuses.Chips, chipView{
+			Label: strings.ReplaceAll(st, "-", " "), On: f.Status == st,
+			Link: with(func(n *store.JobFilter, _ *string) { n.Status = want }),
+		})
+	}
+	groups = append(groups, statuses)
 	// Network, type and duplicates stay filterable by URL, but earn no chips:
 	// the breakdown cards already answer "where do leads come from", and rows
 	// answer "what kind is this one". Chips are for the decision states.

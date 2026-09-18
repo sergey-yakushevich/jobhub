@@ -189,6 +189,46 @@ func TestUpsertCarriesAppStatus(t *testing.T) {
 	}
 }
 
+// The Status filter and the derived Status field are two spellings of one
+// rule. Build a board with a lead on every rung, then check that each filter
+// returns exactly the rows that report that word — and that the six stages
+// partition the whole board.
+func TestStatusFilterMatchesDerivedStatus(t *testing.T) {
+	s := testStore(t)
+	t0 := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
+	batch := []JobParams{
+		{DedupeKey: "st-prep", Network: "reddit"},
+		{DedupeKey: "st-review", Network: "reddit", Prep: `{"summary":"x"}`},
+		{DedupeKey: "st-approved", Network: "reddit", Approved: boolPtr(true)},
+		{DedupeKey: "st-applied", Network: "reddit", Applied: boolPtr(true)},
+		{DedupeKey: "st-rejected", Network: "reddit", Rejected: boolPtr(true), RejectReason: "bad fit"},
+		// Applied first, then ruled out — the classic leak: prep is empty, so
+		// the old prepped=0 filter showed it under "to prep".
+		{DedupeKey: "st-late-reject", Network: "reddit", Applied: boolPtr(true), Rejected: boolPtr(true), RejectReason: "went quiet"},
+		{DedupeKey: "st-hired", Network: "reddit", Applied: boolPtr(true), AppStatus: AppHired},
+		{DedupeKey: "st-turned-down", Network: "reddit", Applied: boolPtr(true), AppStatus: AppRejected},
+	}
+	if _, err := s.UpsertJobs(batch, t0); err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, status := range []string{"to-prep", "to-review", "approved", "applied", "rejected", "hired"} {
+		got, err := s.ListJobs(JobFilter{Status: status}, t0)
+		if err != nil {
+			t.Fatalf("list %s: %v", status, err)
+		}
+		for _, j := range got {
+			if j.Status != status {
+				t.Fatalf("?status=%s returned %q (status %q)", status, j.DedupeKey, j.Status)
+			}
+		}
+		total += len(got)
+	}
+	if total != len(batch) {
+		t.Fatalf("the six stages must partition the board: %d of %d rows", total, len(batch))
+	}
+}
+
 // TouchJobChecked always moves forward — "last checked" means the LAST check.
 func TestTouchJobChecked(t *testing.T) {
 	s := testStore(t)
