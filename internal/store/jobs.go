@@ -79,6 +79,22 @@ type Job struct {
 	// role was US-only or just a bad stack fit.
 	RejectedAt   time.Time `json:"rejected_at,omitzero"`
 	RejectReason string    `json:"reject_reason,omitempty"`
+	// Fit and Workable are the Jev verdict, written by the background scorer
+	// after ingest. They answer two different questions on purpose: Workable
+	// is "may we act on this at all" (yes / blocked / unknown — the four
+	// knockout gates), Fit is "how well does it match" (0-10, the weighted
+	// fit axes). One mixed number could never sort correctly; two columns do.
+	// Workable == "" means the lead was never scored — old rows stay that way
+	// deliberately (no backfill), so a zero Fit is never mistaken for a
+	// judgement.
+	Fit      float64 `json:"fit,omitempty"`
+	Workable string  `json:"workable,omitempty"`
+	// FitDetail is the audit JSON behind the two columns: every gate choice,
+	// every axis distribution, weights, model version and token usage. Kept
+	// so a weight change can be replayed against history without re-calling
+	// the model, and so "why is this blocked" is always answerable.
+	FitDetail string    `json:"fit_detail,omitempty"`
+	FitAt     time.Time `json:"fit_at,omitzero"`
 	// DuplicateOf points at the canonical row when this lead is the same
 	// underlying role reached by another route: an aggregator mirror, a repost,
 	// or a second recruiter at one agency. 0 means this row is canonical.
@@ -362,6 +378,19 @@ CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);
 			return err
 		}
 	}
+	// The Jev verdict columns. Existing rows start blank, and stay blank: the
+	// scorer only ever runs on freshly added leads, so history keeps reading
+	// as "never judged this way" rather than being backfilled at cost.
+	for _, col := range []string{
+		"fit REAL NOT NULL DEFAULT 0",
+		"workable TEXT NOT NULL DEFAULT ''",
+		"fit_detail TEXT NOT NULL DEFAULT ''",
+		"fit_at TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := s.addColumn("jobs", col); err != nil {
+			return err
+		}
+	}
 	return s.backfillJobURLKeys()
 }
 
@@ -554,6 +583,10 @@ func normalizeURL(u string) string {
 type UpsertResult struct {
 	Added   int64 `json:"added"`
 	Updated int64 `json:"updated"`
+	// AddedIDs are the rows this batch CREATED, in insert order. The Jev
+	// scorer reads it: freshly found leads get judged, refreshed ones keep
+	// the verdict they have (or their historical lack of one).
+	AddedIDs []int64 `json:"-"`
 }
 
 // UpsertJobs writes a sweep batch. A re-pushed job refreshes its score, type,
@@ -678,6 +711,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 				return res, err
 			}
 			res.Added++
+			res.AddedIDs = append(res.AddedIDs, newID)
 			continue
 		}
 		if err != nil {
@@ -787,9 +821,16 @@ type JobFilter struct {
 	// Duplicates narrows by mirror state: "" = all, "1" = mirrors only,
 	// "0" = canonical rows only (one row per real role).
 	Duplicates string
+	// Workable narrows by the Jev gate verdict: yes / blocked / unknown, or
+	// "scored" for any verdict at all. "" = all rows, judged or not.
+	Workable   string
 	Since      time.Duration // 0 = all time, else created_at within the window
 	Limit      int
 	SortNewest bool // false = score first
+	// SortFit ranks by the two Jev columns: workable first (yes above
+	// unknown above blocked — unscored rows sort with unknown), fit second.
+	// This is the ordering the typed scorecard exists to make possible.
+	SortFit bool
 }
 
 func (f JobFilter) where(now time.Time) (string, []any) {
@@ -875,6 +916,13 @@ func (f JobFilter) where(now time.Time) (string, []any) {
 	case "0":
 		conds = append(conds, "duplicate_of = 0")
 	}
+	switch f.Workable {
+	case "yes", "blocked", "unknown":
+		conds = append(conds, "workable = ?")
+		args = append(args, f.Workable)
+	case "scored":
+		conds = append(conds, "workable != ''")
+	}
 	if f.Since > 0 {
 		conds = append(conds, "created_at >= ?")
 		args = append(args, fmtTime(now.Add(-f.Since)))
@@ -888,17 +936,21 @@ const jobCols = `id, dedupe_key, profile, network, job_type, score, author, titl
   subreddit, emails, signals, draft, posting_url, posting_text, score_reason, prep,
   posted_at, viewed_at, applied_at,
   rejected_at, reject_reason, approved_at, review_notes, app_status, checked_at,
-  duplicate_of, created_at`
+  duplicate_of, fit, workable, fit_detail, fit_at, created_at`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var j Job
-	var posted, viewed, applied, rejected, approved, checked, created string
+	var posted, viewed, applied, rejected, approved, checked, fitAt, created string
 	if err := row.Scan(&j.ID, &j.DedupeKey, &j.Profile, &j.Network, &j.JobType, &j.Score, &j.Author,
 		&j.Title, &j.Body, &j.URL, &j.Subreddit, &j.Emails, &j.Signals, &j.Draft,
 		&j.PostingURL, &j.PostingText, &j.ScoreReason, &j.Prep,
 		&posted, &viewed, &applied, &rejected, &j.RejectReason,
-		&approved, &j.ReviewNotes, &j.AppStatus, &checked, &j.DuplicateOf, &created); err != nil {
+		&approved, &j.ReviewNotes, &j.AppStatus, &checked, &j.DuplicateOf,
+		&j.Fit, &j.Workable, &j.FitDetail, &fitAt, &created); err != nil {
 		return nil, err
+	}
+	if fitAt != "" {
+		j.FitAt = parseTime(fitAt)
 	}
 	if checked != "" {
 		j.CheckedAt = parseTime(checked)
@@ -928,6 +980,13 @@ func (s *Store) ListJobs(f JobFilter, now time.Time) ([]Job, error) {
 	order := "score DESC, created_at DESC"
 	if f.SortNewest {
 		order = "created_at DESC, score DESC"
+	}
+	if f.SortFit {
+		// yes < unknown/unscored < blocked; within a band, best fit first.
+		// The sweep's own score breaks ties so the pre-Jev board stays a
+		// meaningful order for unscored rows.
+		order = `CASE workable WHEN 'yes' THEN 0 WHEN 'blocked' THEN 2 ELSE 1 END ASC,
+		         fit DESC, score DESC, created_at DESC`
 	}
 	// Repeats sink to the bottom whatever the sort. A mirror is bookkeeping,
 	// not a lead: it says nothing the canonical row does not already say, so a
@@ -1211,6 +1270,28 @@ func (s *Store) setApproved(where string, arg any, approved bool, notes string, 
 // when that shape changes.
 func (s *Store) SetJobPrep(id int64, prep string) error {
 	res, err := s.db.Exec(`UPDATE jobs SET prep = ? WHERE id = ?`, prep, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// SetJobFit writes the Jev verdict onto one lead: the fit number, the
+// workable gate outcome, and the audit detail behind both. Workable must be
+// one of yes / blocked / unknown — the scorer computes it, nothing else
+// writes here, so an unexpected value is a bug worth failing loudly on.
+func (s *Store) SetJobFit(id int64, fit float64, workable, detail string, now time.Time) error {
+	switch workable {
+	case "yes", "blocked", "unknown":
+	default:
+		return fmt.Errorf("bad workable value %q", workable)
+	}
+	res, err := s.db.Exec(
+		`UPDATE jobs SET fit = ?, workable = ?, fit_detail = ?, fit_at = ? WHERE id = ?`,
+		fit, workable, detail, fmtTime(now), id)
 	if err != nil {
 		return err
 	}

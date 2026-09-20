@@ -26,7 +26,11 @@ type Server struct {
 	// STT transcribes the composer's voice notes. Nil means the feature is
 	// off: the endpoint answers 503 and the page falls back to preview-only
 	// recording, so a board without an ElevenLabs key loses nothing else.
-	STT      *ElevenLabsSTT
+	STT *ElevenLabsSTT
+	// Jev is the typed scorer. Ingest hands it the ids of freshly ADDED
+	// leads; nil means the feature is off (no Cloudflare credentials) and
+	// leads simply stay unscored, which the board renders as nothing.
+	Jev      interface{ Enqueue(ids []int64) }
 	mux      *http.ServeMux
 	keyGuard keyThrottle
 }
