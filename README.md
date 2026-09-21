@@ -57,6 +57,33 @@ Pages are gated by short per-page keys derived from a single secret
 not the whole board. Key guessing is rate-limited, everything is served with
 `X-Robots-Tag: noindex` and a deny-all robots.txt.
 
+## Typed scoring (Jev)
+
+With Cloudflare credentials set (`CLOUDFLARE_ACCOUNT_ID`,
+`CLOUDFLARE_API_TOKEN`), every **newly ingested** lead is judged by
+TypeSafe's Jev model (`typesafe/jev` on Workers AI) — one call, nine typed
+questions, no free text. The verdict lands as two columns next to the sweep's
+score:
+
+- **workable** — yes / blocked / unknown, from four knockout gates: is it a
+  real paid role, how it pays, whether the location rule includes Georgia,
+  and whether the apply route actually works. A knockout is a gate, not a low
+  score: a cofounder equity hunt is `blocked` even if the stack matches.
+- **fit 0-10** — a weighted expectation over five fit axes (go_depth,
+  stack_overlap, domain, seniority, frontend_load) with named levels. The
+  weights live in `internal/jev/scorecard.go`, derived from this board's own
+  approve/reject history, and can be changed and replayed against the stored
+  `fit_detail` audit JSON without re-calling the model.
+
+Division of labour, on purpose: dates and counts are parsed in code and
+handed to Jev as plain text (it reads numbers as prose); dead-posting
+detection stays with the sweep's resolver (an HTTP check), and a lead whose
+real posting was never resolved can be at best `unknown`. Existing rows are
+never backfilled — `workable = ''` keeps meaning "never judged this way".
+
+The board sorts and filters on both (`?sort=fit`, `?workable=yes`), and the
+JSON API carries `fit`, `workable` and the full `fit_detail` audit blob.
+
 ## Run it
 
 ```sh

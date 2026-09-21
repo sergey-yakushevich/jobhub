@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sergey-yakushevich/jobhub/internal/httpapi"
+	"github.com/sergey-yakushevich/jobhub/internal/jev"
 	"github.com/sergey-yakushevich/jobhub/internal/seed"
 	"github.com/sergey-yakushevich/jobhub/internal/store"
 )
@@ -56,6 +58,18 @@ func main() {
 	}
 
 	server := httpapi.New(st, apiToken, viewKey)
+	// The Jev scorer is optional the same way voice notes are: with Cloudflare
+	// credentials every freshly ingested lead gets the typed verdict (fit +
+	// workable), without them leads simply stay unscored.
+	if account, token := os.Getenv("CLOUDFLARE_ACCOUNT_ID"), os.Getenv("CLOUDFLARE_API_TOKEN"); account != "" && token != "" {
+		scorer := jev.NewScorer(&jev.Client{AccountID: account, Token: token}, st)
+		if base := os.Getenv("JEV_BASE_URL"); base != "" {
+			scorer.Client.BaseURL = strings.TrimRight(base, "/")
+		}
+		scorer.Start(context.Background())
+		server.Jev = scorer
+		log.Printf("jev scoring on (account %s…)", account[:min(8, len(account))])
+	}
 	// Voice notes are optional: with a key the composer's recordings are
 	// transcribed into the review note, without one they stay a preview.
 	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" {

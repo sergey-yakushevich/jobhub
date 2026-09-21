@@ -132,6 +132,12 @@ func (s *Server) handleJobsIngest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest failed"})
 		return
 	}
+	// Only rows this push CREATED go to the scorer. Updated rows keep their
+	// verdict, and the pre-Jev history is never backfilled: judging it would
+	// cost real calls to restate decisions already taken.
+	if s.Jev != nil && len(res.AddedIDs) > 0 {
+		s.Jev.Enqueue(res.AddedIDs)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"added":   res.Added,
 		"updated": res.Updated,
@@ -518,7 +524,21 @@ func jobFilterFromQuery(q url.Values) store.JobFilter {
 		// caps it).
 		Limit:      atoiOr(q.Get("limit"), 0),
 		SortNewest: q.Get("sort") == "new",
+		SortFit:    q.Get("sort") == "fit",
+		// ?workable= narrows by the Jev gate verdict; unknown words mean
+		// "all", like every other filter param.
+		Workable: workableParam(q.Get("workable")),
 	}
+}
+
+// workableParam whitelists ?workable=: the three verdicts, plus "scored" for
+// any verdict at all.
+func workableParam(v string) string {
+	switch v = strings.ToLower(strings.TrimSpace(v)); v {
+	case "yes", "blocked", "unknown", "scored":
+		return v
+	}
+	return ""
 }
 
 // jobStatuses is the derived ladder in workflow order — the chip row renders
@@ -676,6 +696,7 @@ func (s *Server) handleJobShow(w http.ResponseWriter, r *http.Request) {
 		// for a link that arrived without one (or with someone else's).
 		BackTo: s.safeBack(r.URL.Query().Get("back")),
 		DupOf:  job.DuplicateOf,
+		JevFit: jevFitViewOf(job),
 
 		Prep:        prep,
 		PrepRaw:     job.Prep,
@@ -801,6 +822,10 @@ func jobAge(j *store.Job, now time.Time) string {
 
 type jobRowView struct {
 	Score string
+	// Fit and Workable are the Jev columns. Workable == "" (never scored)
+	// renders as nothing at all: an absent verdict must not read as one.
+	Fit      string
+	Workable string
 	// Profile is set only on a board showing more than one seeker. Repeating
 	// "polina" down a list already filtered to Polina is noise; on a mixed
 	// board it is the first thing you need per row.
@@ -887,8 +912,14 @@ func (s *Server) jobRows(jobs []store.Job, now time.Time, back string, showProfi
 		if showProfile {
 			profile = j.Profile
 		}
+		fit := ""
+		if j.Workable != "" {
+			fit = strconv.FormatFloat(j.Fit, 'f', -1, 64)
+		}
 		out[i] = jobRowView{
 			Score:     strconv.FormatFloat(j.Score, 'f', -1, 64),
+			Fit:       fit,
+			Workable:  j.Workable,
 			Profile:   profile,
 			Net:       s.netTag(j.Network),
 			Type:      j.JobType,
@@ -979,6 +1010,12 @@ func (s *Server) jobsLink(f store.JobFilter, since string) string {
 	if f.SortNewest {
 		q.Set("sort", "new")
 	}
+	if f.SortFit {
+		q.Set("sort", "fit")
+	}
+	if f.Workable != "" {
+		q.Set("workable", f.Workable)
+	}
 	return s.BasePath + "/jobs?" + q.Encode()
 }
 
@@ -1039,7 +1076,19 @@ func (s *Server) jobChips(f store.JobFilter, profiles []string) []chipGroup {
 			{Label: "not viewed", On: f.UnviewedOnly,
 				Link: with(func(n *store.JobFilter, _ *string) { n.UnviewedOnly = !f.UnviewedOnly })},
 			{Label: "newest first", On: f.SortNewest,
-				Link: with(func(n *store.JobFilter, _ *string) { n.SortNewest = !f.SortNewest })},
+				Link: with(func(n *store.JobFilter, _ *string) { n.SortNewest = !f.SortNewest; n.SortFit = false })},
+			{Label: "best fit", On: f.SortFit,
+				Link: with(func(n *store.JobFilter, _ *string) { n.SortFit = !f.SortFit; n.SortNewest = false })},
+		}},
+		// The Jev gate verdict is its own dimension: workable is not a stage
+		// (a blocked lead may still be to-prep) and not a score band.
+		chipGroup{Name: "workable", Chips: []chipView{
+			{Label: "yes", On: f.Workable == "yes",
+				Link: with(func(n *store.JobFilter, _ *string) { n.Workable = toggle(f.Workable, "yes") })},
+			{Label: "unknown", On: f.Workable == "unknown",
+				Link: with(func(n *store.JobFilter, _ *string) { n.Workable = toggle(f.Workable, "unknown") })},
+			{Label: "blocked", On: f.Workable == "blocked",
+				Link: with(func(n *store.JobFilter, _ *string) { n.Workable = toggle(f.Workable, "blocked") })},
 		}},
 	)
 	// One chip per rung of the derived ladder, replacing the old flag chips
@@ -1266,6 +1315,73 @@ type jobShowData struct {
 	DupOf   int64
 	DupLink string
 	Repeats []dupRefView
+	// JevFit is the typed verdict, nil when the lead was never scored — the
+	// section simply is not there, same rule as the row chips.
+	JevFit *jevFitView
+}
+
+// jevFitView renders the fit_detail audit blob: the two columns up top, then
+// one line per gate and per axis so "why is this blocked" and "where did 7.2
+// come from" are answered on the page, not in a JSON column.
+type jevFitView struct {
+	Fit      string
+	Workable string
+	Why      string
+	Model    string
+	Gates    []jevLineView
+	Axes     []jevLineView
+}
+
+type jevLineView struct {
+	Name  string
+	Value string // the chosen option / most likely level
+	Note  string // "blocked"/"pass"/"unknown" for gates, points for axes
+	Bad   bool
+}
+
+// jevFitViewOf decodes the stored audit JSON leniently: the page shows what
+// it recognizes and a malformed blob just means no section, never a 500.
+func jevFitViewOf(j *store.Job) *jevFitView {
+	if j.Workable == "" || j.FitDetail == "" {
+		return nil
+	}
+	var d struct {
+		Model string `json:"model"`
+		Why   string `json:"why"`
+		Gates map[string]struct {
+			Choice     string  `json:"choice"`
+			Verdict    string  `json:"verdict"`
+			Confidence float64 `json:"confidence"`
+		} `json:"gates"`
+		Axes map[string]struct {
+			Level  string  `json:"level"`
+			Points float64 `json:"points"`
+			Weight float64 `json:"weight"`
+		} `json:"axes"`
+	}
+	if err := json.Unmarshal([]byte(j.FitDetail), &d); err != nil {
+		return nil
+	}
+	v := &jevFitView{
+		Fit:      strconv.FormatFloat(j.Fit, 'f', 1, 64),
+		Workable: j.Workable,
+		Why:      d.Why,
+		Model:    d.Model,
+	}
+	for _, name := range []string{"is_it_a_job", "pay_model", "location_rule", "apply_route"} {
+		if g, ok := d.Gates[name]; ok {
+			v.Gates = append(v.Gates, jevLineView{Name: name, Value: g.Choice,
+				Note: fmt.Sprintf("%s · %.0f%%", g.Verdict, g.Confidence*100),
+				Bad:  g.Verdict == "blocked"})
+		}
+	}
+	for _, name := range []string{"go_depth", "stack_overlap", "domain", "seniority", "frontend_load"} {
+		if a, ok := d.Axes[name]; ok {
+			v.Axes = append(v.Axes, jevLineView{Name: name, Value: a.Level,
+				Note: fmt.Sprintf("%.1f of %.1f", a.Points, a.Weight)})
+		}
+	}
+	return v
 }
 
 // prepView is the review artifact as the page renders it.
@@ -1447,6 +1563,15 @@ const jobsBoardHTML = `<!doctype html>
   .row .top .score { margin-right:0; }
   .row .who { font-weight:600; word-break:break-word; }
   .row.dup .score { background:var(--tertiary); color:var(--hint); }
+  /* The Jev columns: fit rides next to the sweep score in its own shape (a
+     ring, not a pill, so the two numbers never read as one scale), and the
+     workable verdict is a colored tag. Unscored rows show neither. */
+  .row .fit { border:1.5px solid var(--accent); color:var(--accent); border-radius:8px;
+              padding:1px 7px; font-weight:700; font-size:13px; }
+  .row.dup .fit { border-color:var(--tertiary); color:var(--hint); }
+  .tag.wk-yes { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
+  .tag.wk-blocked { background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
+  .tag.wk-unknown { background:var(--tertiary); color:var(--hint); }
   .meta { color:var(--hint); font-size:13px; margin-top:2px; }
   .meta .tag { margin:0 2px 0 0; }
   .snippet { word-break:break-word; margin-top:2px; }
@@ -1510,7 +1635,7 @@ const jobsBoardHTML = `<!doctype html>
   <div class="row{{if .Viewed}} seen{{end}}{{if .Applied}} applied{{end}}{{if .Rejected}} rejected{{end}}{{if .Hired}} hired{{end}}{{if .AppRej}} apprej{{end}}{{if .DupOf}} dup{{end}}">
     <a class="main" href="{{.ShowLink}}">
       <div class="top">
-        <span class="score">{{.Score}}</span><span class="who">{{.Author}}</span>{{if .DupCount}}<span class="tag dup">+{{.DupCount}} repeat{{if gt .DupCount 1}}s{{end}}</span>{{end}}
+        <span class="score">{{.Score}}</span>{{if .Workable}}<span class="fit" title="jev fit 0-10">{{.Fit}}</span><span class="tag wk-{{.Workable}}" title="jev gates">{{.Workable}}</span>{{end}}<span class="who">{{.Author}}</span>{{if .DupCount}}<span class="tag dup">+{{.DupCount}} repeat{{if gt .DupCount 1}}s{{end}}</span>{{end}}
         <!-- One state chip, in order of what matters: an answered application
              (hired / turned down) beats ruled out, ruled out beats applied,
              and applied beats new. Stacking them all reads as noise. -->
@@ -1882,6 +2007,23 @@ const jobShowHTML = `<!doctype html>
   .tl-kind.accent { background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .tl-note { word-break:break-word; min-width:0; }
   .tl-note:empty { display:none; }
+  /* The typed verdict card: the two columns on top, one line per question
+     under them. Gates that blocked go red; everything else stays quiet. */
+  .jev-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .jev-top .fitn { font-weight:700; border:1.5px solid var(--accent); color:var(--accent);
+                   border-radius:8px; padding:1px 8px; }
+  .jev-top .tag { font-size:12px; font-weight:600; border-radius:999px; padding:2px 10px; }
+  .tag.wk-yes { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
+  .tag.wk-blocked { background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
+  .tag.wk-unknown { background:var(--tertiary); color:var(--hint); }
+  .jev-model { color:var(--hint); font-size:12px; margin-left:auto; }
+  .jev-why { color:var(--hint); font-size:13px; margin:6px 0 10px; }
+  .jev-split { border-top:1px solid var(--tertiary); margin:8px 0; }
+  .jr { display:flex; gap:10px; padding:3px 0; font-size:14px; }
+  .jr .l { flex:0 0 120px; color:var(--hint); }
+  .jr .v { min-width:0; }
+  .jr .n { margin-left:auto; color:var(--hint); font-size:13px; white-space:nowrap; }
+  .jr.bad .v, .jr.bad .n { color:var(--bad); }
   @media (max-width: 480px) { main { padding:12px 10px 48px; } }
 </style>
 <main class="{{if .Applied}}applied {{end}}{{if .Approved}}approved {{end}}{{if .J.Rejected}}rejected {{end}}{{if .Hired}}hired {{end}}{{if .AppRejected}}apprej {{end}}{{if .Prep}}prepped{{end}}">
@@ -1973,6 +2115,16 @@ const jobShowHTML = `<!doctype html>
   {{if .PrepRaw}}{{if not .Prep}}<div class="sec">prep unreadable</div><div class="card box bad"><div class="body">The prep artifact on this lead is not valid JSON, so it could not be rendered. Re-run the prep stage for it.</div></div>{{end}}{{end}}
   {{if .J.Title}}<div class="sec">title</div><div class="card box"><div class="body">{{.J.Title}}</div></div>{{end}}
   {{if .J.ScoreReason}}<div class="sec">why this score</div><div class="card box"><div class="body">{{.J.ScoreReason}}</div></div>{{end}}
+  {{with .JevFit}}
+  <div class="sec">typed verdict (jev)</div>
+  <div class="card box jev">
+    <div class="jev-top"><span class="fitn">fit {{.Fit}}</span><span class="tag wk-{{.Workable}}">{{.Workable}}</span><span class="jev-model">{{.Model}}</span></div>
+    <div class="jev-why">{{.Why}}</div>
+    {{range .Gates}}<div class="jr{{if .Bad}} bad{{end}}"><span class="l">{{.Name}}</span><span class="v">{{.Value}}</span><span class="n">{{.Note}}</span></div>{{end}}
+    {{if .Axes}}<div class="jev-split"></div>{{end}}
+    {{range .Axes}}<div class="jr"><span class="l">{{.Name}}</span><span class="v">{{.Value}}</span><span class="n">{{.Note}}</span></div>{{end}}
+  </div>
+  {{end}}
   {{if .J.Body}}<div class="sec">post</div><div class="card box"><div class="body">{{.J.Body}}</div></div>{{end}}
   {{if .J.PostingText}}<div class="sec">the real posting</div><div class="card box"><div class="body">{{.J.PostingText}}</div></div>{{end}}
   {{if .Emails}}<div class="sec">contacts</div><div class="card box">{{range .Emails}}<div><a class="mail" href="mailto:{{.}}">{{.}}</a></div>{{end}}</div>{{end}}
