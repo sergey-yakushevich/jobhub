@@ -262,22 +262,21 @@ func TestBoardEndToEnd(t *testing.T) {
 		t.Fatal("the lead page does not show both boards")
 	}
 
-	// 9. The profiles index is reachable from the board and describes all three
+	// 9. The profiles index is reachable from the board and describes the two
 	//    seekers the binary ships with.
 	index := b.get("/profiles?k=" + boardKey)
-	for _, want := range []string{"Sergey Yakushevich", "Polina Avdevich", "Siarhei Lyagushevich"} {
+	for _, want := range []string{"Sergey Yakushevich", "Polina Avdevich"} {
 		if !strings.Contains(index, want) {
 			t.Fatalf("profiles index missing %q", want)
 		}
+	}
+	if strings.Contains(index, "Siarhei Lyagushevich") {
+		t.Fatal("profiles index still lists the retired Siarhei profile")
 	}
 	// The seeded descriptions are on the pages, not just in the binary.
 	polinaPage := b.get("/profiles/polina?k=" + boardKey)
 	if !strings.Contains(polinaPage, "AI Creative Producer") || !strings.Contains(polinaPage, "Midjourney") {
 		t.Fatal("polina's seeded description did not reach her page")
-	}
-	siarhei := b.get("/profiles/siarhei?k=" + boardKey)
-	if !strings.Contains(siarhei, "Minsk, Belarus") || !strings.Contains(siarhei, "PCI-DSS") {
-		t.Fatal("siarhei's seeded description did not reach his page")
 	}
 }
 

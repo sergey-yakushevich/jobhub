@@ -32,7 +32,7 @@ func TestApplyWritesEveryProfile(t *testing.T) {
 	if len(written) != len(Profiles) {
 		t.Fatalf("wrote %v, want all %d profiles", written, len(Profiles))
 	}
-	for _, want := range []string{"sergey", "polina", "siarhei"} {
+	for _, want := range []string{"sergey", "polina"} {
 		p, err := st.ProfileBySlug(want)
 		if err != nil {
 			t.Fatalf("%s: %v", want, err)
@@ -49,15 +49,18 @@ func TestApplyWritesEveryProfile(t *testing.T) {
 			}
 		}
 	}
-	// The three are distinct people to the board, even where two share a career.
-	sergey, _ := st.ProfileBySlug("sergey")
-	siarhei, _ := st.ProfileBySlug("siarhei")
-	if sergey.Name == siarhei.Name {
-		t.Fatal("sergey and siarhei carry the same name")
+	// Exactly these two ship. Siarhei was retired, and a seed must not bring
+	// the identity back.
+	if len(Profiles) != 2 {
+		t.Fatalf("Profiles has %d entries, want 2", len(Profiles))
 	}
-	if !strings.Contains(siarhei.Conditions, "Minsk") || !strings.Contains(sergey.Conditions, "Batumi") {
-		t.Fatalf("the two identities do not differ where it matters:\n%q\n%q",
-			sergey.Conditions, siarhei.Conditions)
+	for _, p := range Profiles {
+		if p.Slug != "sergey" && p.Slug != "polina" {
+			t.Fatalf("unexpected shipped profile %q", p.Slug)
+		}
+	}
+	if p, err := st.ProfileBySlug("siarhei"); err == nil {
+		t.Fatalf("siarhei was seeded: %+v", p)
 	}
 }
 

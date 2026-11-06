@@ -1,0 +1,17 @@
+{{define "board"}}{{template "head" .}}{{template "nav" .}}
+<main class="board-page">
+  <div class="page-heading"><h1>Jobs</h1><button class="button primary" type="button" data-open="job-dialog">+ Add job</button></div>
+  <div class="chips"><a class="chip{{if not .NeedsYou}}{{if not .Stage}} on{{end}}{{end}}" href="{{boardURL .Profile}}">all</a><a class="chip{{if .NeedsYou}} on{{end}}" href="{{boardURL .Profile}}&needs_you=true">needs you</a><a class="chip{{if eq .Stage "interview"}} on{{end}}" href="{{boardURL .Profile}}&stage=interview">interviews</a><a class="chip{{if eq .Stage "offer"}} on{{end}}" href="{{boardURL .Profile}}&stage=offer">offers</a></div>
+  <form id="job-filters" method="get" action="/jobs" class="filters">
+    <select class="profile-filter" name="profile" aria-label="Profile"><option value="all" {{if eq .Profile "all"}}selected{{end}}>All</option>{{range profiles}}<option value="{{.}}" {{if eq $.Profile .}}selected{{end}}>{{.}}</option>{{end}}</select>
+    <input type="search" name="q" aria-label="Search jobs" placeholder="search company or role" value="{{.Query}}">
+    {{if .Stage}}<input type="hidden" name="stage" value="{{.Stage}}">{{end}}
+    {{if .Remote}}<input type="hidden" name="remote" value="{{.Remote}}">{{end}}
+    {{if .NeedsYou}}<input type="hidden" name="needs_you" value="true">{{end}}
+  </form>
+  {{template "dashboard" .}}
+  <div class="job-list">{{range .Jobs}}
+    <a class="job-row stage-{{.Stage}}" href="{{jobURL .ID $.Profile}}"><div class="row-top"><span class="who">{{if .FitScore}}<span class="score" title="Match score out of 10">{{fit .FitScore}}</span>{{end}}{{.Company}} · {{.Title}}</span><span class="status-badge {{.Stage}}">{{.Stage}}</span></div><div class="meta">{{.Profile}} · <span class="remote-{{.Remote}}">{{.Remote}}</span>{{if .Location}} · {{.Location}}{{end}}</div><div class="meta salary-line">{{salary .}}{{if .Employment}} · {{.Employment}}{{end}}</div><div class="last">{{if .NeedsYou}}<span class="needs-label">needs you</span>{{else if .WaitingOn}}<span class="muted">waiting on {{.WaitingOn}}</span>{{end}}{{if .NextAction}}<span class="row-next">{{.NextAction}}</span>{{end}}{{if .InterviewAt}}<time datetime="{{.InterviewAt}}" data-date="full">{{when .InterviewAt}}</time>{{end}}</div></a>
+  {{else}}<div class="box empty-state"><p>No jobs match these filters.</p><button class="button primary" type="button" data-open="job-dialog">+ add job</button> <a href="{{boardURL .Profile}}">clear filters</a></div>{{end}}</div>
+  {{if .NextURL}}<a class="button secondary load-more" href="{{.NextURL}}">older jobs →</a>{{end}}
+</main>{{template "job-form" .}}{{template "footer" .}}{{end}}

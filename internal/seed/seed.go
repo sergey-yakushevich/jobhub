@@ -35,7 +35,7 @@ func Apply(st *store.Store, now time.Time) ([]string, error) {
 
 // Profiles is the shipped set. Slugs match the profile names the sweeps
 // already tag leads with, which is what ties a description to a board.
-var Profiles = []store.ProfileParams{sergey, polina, siarhei}
+var Profiles = []store.ProfileParams{sergey, polina}
 
 // sergey is transcribed from jobhunt/profiles/sergey.yaml — the master profile
 // every tailored CV is built from. The conditions section holds what that file
@@ -134,56 +134,4 @@ Source: "Polina Avdevich — AI Creative Producer.pdf".`,
 	Links: `https://sy4iz.com
 https://linkedin.com/in/polina-avdevich-049a06428
 olgaavdevich80@gmail.com`,
-}
-
-// siarhei is the same career as sergey under the Belarusian spelling of his
-// name and a Minsk location — the CV at Resumes/Sergey_2. It is a separate
-// profile rather than a note on his, because the board files leads by the
-// identity they were sent under, and these two are sent under different ones.
-var siarhei = store.ProfileParams{
-	Slug:     "siarhei",
-	Name:     "Siarhei Lyagushevich",
-	Headline: "Senior Backend Engineer — Go (Golang), Ruby",
-	Summary: `Senior Backend Engineer (Go, Ruby), based in Minsk, Belarus. The same career as the sergey profile, applied for under the Belarusian spelling of his name and a Minsk location line.
-
-I have spent 10 years on backends, and the last 5 of them on payment systems. At Moyasar I built fraud blocking and regulatory KYC on a platform that has processed 350M+ payments across 10+ microservices. Before that I shipped Visa installments and PCI-DSS card tokenization at Mondido, where I also moved our first services to Go and built banking integrations at Regate. I take a feature from schema design through to the alert that pages someone when it breaks in production. I have written Go in production since 2024 and Ruby for most of the decade before it, and I am looking for backend roles in Go or Ruby.`,
-	Skills: `Go (Golang), Ruby, Ruby on Rails
-Concurrency & message queues, Kafka, event-driven systems, microservices, distributed systems
-API design (REST & GraphQL), OAuth2 / JWT
-PostgreSQL, Redis, Elasticsearch
-Docker, Kubernetes, Terraform, AWS (EC2, RDS, S3, Lambda, ECS), CI/CD (GitHub Actions)
-Payment gateway integration, PCI-DSS compliance, 3DS authentication, card tokenization, fraud detection, identity verification (KYC)
-English (C1)`,
-	Experience: `Moyasar — Senior Engineer, Dec 2025 – Aug 2026 (Ruby on Rails, PostgreSQL, Microservices, Kafka, Fraud Detection)
-• Built the fraud system that scores and blocks transactions on risk signals, on a platform that has taken 350M+ payments.
-• Shipped identity verification to the regulator's spec, needed to expand into new markets.
-• Wrote the alerting for payment flow disruptions and took time to detection from hours to seconds.
-• Analysed on his own initiative which platform features merchants actually use, and handed management the numbers. Sales now leads with the most adopted features when pitching new clients.
-• Sat in on sales calls as the technical voice when a prospective merchant had integration questions.
-
-Mondido — Senior Engineer, Jan 2024 – Nov 2025 (Go, Ruby on Rails, React, PostgreSQL, PCI-DSS, Card Tokenization)
-• Wrote Go services on the platform, taking the high-throughput parts of the gateway integration off Rails and onto a runtime that handles concurrent calls without a worker pool per request.
-• Delivered the Visa installment integration, backend and checkout UI.
-• Built PCI-DSS compliant card tokenization for gateway calls, so raw card numbers stayed out of our systems.
-• Built the audit log that traces every merchant and staff action without adding latency to the request path.
-
-Regate — Senior Engineer, Nov 2021 – Jan 2024 (Kafka, Event-Driven, AWS, Kubernetes, Terraform, Ruby on Rails)
-• Owned the integrations with the payment and banking APIs that drive the automated accounting workflows.
-• Started the service-layer refactor that pulled business logic out of callback-heavy Rails models.
-• Raised RSpec coverage and added CloudWatch dashboards, so regressions surfaced in CI rather than in production.
-
-iTransition — Software Engineer, Jan 2018 – Jun 2020 (PostgreSQL, Kafka, Elasticsearch, Microservices, AWS ECS, Ruby on Rails)
-• Moved the main search workload off MySQL onto Elasticsearch and made it 90% faster for 50M+ users.
-• Made the test pipeline 5x faster, which took a full release cycle down from days to hours.
-• Tuned the PostgreSQL layer under the platform: replaced indexes that no longer matched the query patterns, rewrote the slowest reads, and cut the load the reporting queries put on the primary.
-
-Education: Belarusian State University, BSc Computer Science, 2013 – 2018.`,
-	Conditions: `Location line on this CV: Minsk, Belarus. Remote.
-English: C1.
-Source: Resumes/Sergey_2/Siarhei_Lyagushevich_—_Senior_Backend_Engineer_—_Go_Golang,_Ruby.pdf. It states no rate or notice period, so neither is recorded here.`,
-	Links: `https://cyberjosef.dev
-https://github.com/sergey-yakushevich
-https://linkedin.com/in/sergey-yakushevich-688a4b179
-sergeyayya@gmail.com
-+48530213401`,
 }

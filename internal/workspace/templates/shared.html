@@ -1,0 +1,59 @@
+{{define "head"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="{{.CSRF}}"><title>{{.Title}} · JobHub</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/assets/app.css"><script src="/assets/app.js" defer></script></head><body>{{end}}
+
+{{define "nav"}}
+<header class="site-header">
+  {{if ne .Title "Jobs"}}<a href="{{boardURL .Profile}}">← jobs</a>{{else}}<span></span>{{end}}
+  <details class="workspace-menu"><summary aria-label="Workspace options" title="Options">⋯</summary>
+    <nav class="menu-panel" aria-label="Workspace">
+      {{if .Demo}}<span class="muted">demo data</span>{{end}}
+      <a href="/api-docs?profile={{.Profile}}">API</a>
+      <button class="text-button theme-toggle" type="button">Light theme</button>
+      <form action="/logout" method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="text-button" type="submit">sign out</button></form>
+    </nav>
+  </details>
+</header>{{end}}
+
+{{define "footer"}}</body></html>{{end}}
+
+{{define "job-form"}}
+<dialog id="job-dialog" aria-labelledby="edit-heading">
+  <form id="job-form" data-job-id="{{if .Job}}{{.Job.ID}}{{end}}" data-version="{{if .Job}}{{.Job.Version}}{{end}}">
+    <div class="dialog-header"><h2 id="edit-heading">{{if .Job}}Edit job{{else}}Add job{{end}}</h2><button type="button" class="close-dialog icon-button" aria-label="Close">×</button></div>
+    <div class="form-error" role="alert" hidden></div>
+    <div class="form-grid">
+      <label>Company<input name="company" required maxlength="200" value="{{if .Job}}{{.Job.Company}}{{end}}"></label>
+      <label>Role<input name="title" required maxlength="300" value="{{if .Job}}{{.Job.Title}}{{end}}"></label>
+      <label>Profile{{if .Job}}<input name="profile" value="{{.Job.Profile}}" readonly>{{else}}<select name="profile" required>{{range profiles}}<option value="{{.}}" {{if eq $.Profile .}}selected{{end}}>{{.}}</option>{{end}}</select>{{end}}</label>
+      <label>Stage<select name="stage">{{range stages}}<option value="{{.}}" {{if $.Job}}{{if selected $.Job.Stage .}}selected{{end}}{{end}}>{{label .}}</option>{{end}}</select></label>
+      <label>Work arrangement<select name="remote">{{range remotes}}<option value="{{.}}" {{if $.Job}}{{if selected $.Job.Remote .}}selected{{end}}{{end}}>{{.}}</option>{{end}}</select></label>
+      <label>Location / eligibility<input name="location" placeholder="Remote in EMEA; B2B allowed" value="{{if .Job}}{{.Job.Location}}{{end}}"></label>
+      <label>Contract type<select name="employment">{{$emp := ""}}{{if .Job}}{{$emp = .Job.Employment}}{{end}}
+        <option value="">Not specified</option><option value="full-time" {{if eq $emp "full-time"}}selected{{end}}>Full-time</option><option value="part-time" {{if eq $emp "part-time"}}selected{{end}}>Part-time</option><option value="contract" {{if eq $emp "contract"}}selected{{end}}>Contract</option><option value="freelance" {{if eq $emp "freelance"}}selected{{end}}>Freelance</option>
+      </select></label>
+      <label>Job posting URL<input type="url" name="url" value="{{if .Job}}{{.Job.URL}}{{end}}" placeholder="https://…"></label>
+      <label>Salary from<input type="number" step="any" min="0" name="salary_min" value="{{if .Job}}{{if .Job.SalaryMin}}{{fit .Job.SalaryMin}}{{end}}{{end}}"></label>
+      <label>Salary to<input type="number" step="any" min="0" name="salary_max" value="{{if .Job}}{{if .Job.SalaryMax}}{{fit .Job.SalaryMax}}{{end}}{{end}}"></label>
+      <label>Currency<input name="currency" maxlength="3" placeholder="USD" value="{{if .Job}}{{.Job.Currency}}{{end}}"></label>
+      <label>Pay period<select name="salary_period">{{$period := ""}}{{if .Job}}{{$period = .Job.SalaryPeriod}}{{end}}
+        <option value="">Not specified</option><option value="year" {{if eq $period "year"}}selected{{end}}>Year</option><option value="month" {{if eq $period "month"}}selected{{end}}>Month</option><option value="hour" {{if eq $period "hour"}}selected{{end}}>Hour</option>
+      </select></label>
+      <label>Match score / 10<input type="number" min="0" max="10" step="0.1" name="fit_score" value="{{if .Job}}{{if .Job.FitScore}}{{fit .Job.FitScore}}{{end}}{{end}}"></label>
+      <label>Skills, comma-separated<input name="skills" value="{{if .Job}}{{range $i,$v:=.Job.Skills}}{{if $i}}, {{end}}{{$v}}{{end}}{{end}}"></label>
+      <label class="full">Why this match?<textarea name="fit_summary" rows="2">{{if .Job}}{{.Job.FitSummary}}{{end}}</textarea></label>
+      <label>Strengths · one per line<textarea name="strengths" rows="3">{{if .Job}}{{join .Job.Strengths}}{{end}}</textarea></label>
+      <label>Gaps / unknowns · one per line<textarea name="gaps" rows="3">{{if .Job}}{{join .Job.Gaps}}{{end}}</textarea></label>
+      <label class="full">Job summary<textarea name="description" rows="4">{{if .Job}}{{.Job.Description}}{{end}}</textarea></label>
+      <label>Recruiter<input name="recruiter_name" value="{{if .Job}}{{.Job.RecruiterName}}{{end}}"></label>
+      <label>Contact / handle<input name="recruiter_contact" value="{{if .Job}}{{.Job.RecruiterContact}}{{end}}"></label>
+      <label class="full">Next action<input name="next_action" value="{{if .Job}}{{.Job.NextAction}}{{end}}"></label>
+      <label>Waiting on<select name="waiting_on">{{$wait := ""}}{{if .Job}}{{$wait = .Job.WaitingOn}}{{end}}
+        <option value="">Nobody / not set</option><option value="agent" {{if eq $wait "agent"}}selected{{end}}>Agent</option><option value="recruiter" {{if eq $wait "recruiter"}}selected{{end}}>Recruiter</option><option value="you" {{if eq $wait "you"}}selected{{end}}>You</option>
+      </select></label>
+      <label>Next action due (your local time)<input type="datetime-local" name="next_action_at" data-iso="{{if .Job}}{{.Job.NextActionAt}}{{end}}"></label>
+      <label>Interview (your local time)<input type="datetime-local" name="interview_at" data-iso="{{if .Job}}{{.Job.InterviewAt}}{{end}}"></label>
+      <label>Interview link<input type="url" name="interview_url" value="{{if .Job}}{{.Job.InterviewURL}}{{end}}"></label>
+      <label class="checkbox-label full"><input type="checkbox" name="needs_you" {{if .Job}}{{if .Job.NeedsYou}}checked{{end}}{{end}}>Needs my attention</label>
+    </div>
+    <div class="dialog-footer"><button type="button" class="button secondary close-dialog">Cancel</button><button type="submit" class="button primary">Save job</button></div>
+  </form>
+</dialog>{{end}}

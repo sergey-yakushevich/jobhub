@@ -1,0 +1,2134 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "JobHub Agent API",
+    "version": "1.0.0",
+    "description": "Private job management and append-only timeline. No outbound execution. Jobs and events require stable source keys. All requests require bearer auth. Times are RFC3339. Job lists and event lists use newest-record-ID-first keyset pagination. A new event increments its job version. Only check events advance last_checked_at, using the actual check occurrence time. Rotating the key and restarting revokes browser sessions."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "JOBHUB_API_KEY from private local environment; never use URL query keys."
+      }
+    },
+    "schemas": {
+      "JobCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Stable unique key per profile. Reusing with changed create payload is a conflict."
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "sergey",
+              "polina"
+            ],
+            "default": "sergey"
+          },
+          "company": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "applied",
+              "talking",
+              "interview",
+              "offer",
+              "hired",
+              "rejected",
+              "archived"
+            ],
+            "default": "saved"
+          },
+          "remote": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "remote",
+              "hybrid",
+              "onsite"
+            ],
+            "default": "unknown"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Geographic/work-authorization restrictions; remote does not imply eligible."
+          },
+          "employment": {
+            "type": "string",
+            "enum": [
+              "",
+              "full-time",
+              "part-time",
+              "contract",
+              "freelance"
+            ]
+          },
+          "salary_min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "salary_max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^$|^[A-Z]{3}$"
+          },
+          "salary_period": {
+            "type": "string",
+            "enum": [
+              "",
+              "year",
+              "month",
+              "hour"
+            ]
+          },
+          "fit_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Null means not assessed. A number requires fit_summary."
+          },
+          "fit_summary": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "strengths": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "gaps": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "recruiter_name": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "recruiter_contact": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "waiting_on": {
+            "type": "string",
+            "enum": [
+              "",
+              "agent",
+              "recruiter",
+              "you"
+            ]
+          },
+          "needs_you": {
+            "type": "boolean",
+            "default": false
+          },
+          "interview_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "interview_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          }
+        },
+        "required": [
+          "source_key",
+          "company",
+          "title"
+        ]
+      },
+      "JobPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "company": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "applied",
+              "talking",
+              "interview",
+              "offer",
+              "hired",
+              "rejected",
+              "archived"
+            ],
+            "default": "saved"
+          },
+          "remote": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "remote",
+              "hybrid",
+              "onsite"
+            ],
+            "default": "unknown"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Geographic/work-authorization restrictions; remote does not imply eligible."
+          },
+          "employment": {
+            "type": "string",
+            "enum": [
+              "",
+              "full-time",
+              "part-time",
+              "contract",
+              "freelance"
+            ]
+          },
+          "salary_min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "salary_max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^$|^[A-Z]{3}$"
+          },
+          "salary_period": {
+            "type": "string",
+            "enum": [
+              "",
+              "year",
+              "month",
+              "hour"
+            ]
+          },
+          "fit_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Null means not assessed. A number requires fit_summary."
+          },
+          "fit_summary": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "strengths": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "gaps": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "recruiter_name": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "recruiter_contact": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "waiting_on": {
+            "type": "string",
+            "enum": [
+              "",
+              "agent",
+              "recruiter",
+              "you"
+            ]
+          },
+          "needs_you": {
+            "type": "boolean",
+            "default": false
+          },
+          "interview_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "interview_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          }
+        },
+        "required": []
+      },
+      "Job": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "readOnly": true
+          },
+          "source_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Stable unique key per profile. Reusing with changed create payload is a conflict."
+          },
+          "profile": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z0-9_-]+$",
+            "default": "sergey"
+          },
+          "company": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "applied",
+              "talking",
+              "interview",
+              "offer",
+              "hired",
+              "rejected",
+              "archived"
+            ],
+            "default": "saved"
+          },
+          "remote": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "remote",
+              "hybrid",
+              "onsite"
+            ],
+            "default": "unknown"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Geographic/work-authorization restrictions; remote does not imply eligible."
+          },
+          "employment": {
+            "type": "string",
+            "enum": [
+              "",
+              "full-time",
+              "part-time",
+              "contract",
+              "freelance"
+            ]
+          },
+          "salary_min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "salary_max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^$|^[A-Z]{3}$"
+          },
+          "salary_period": {
+            "type": "string",
+            "enum": [
+              "",
+              "year",
+              "month",
+              "hour"
+            ]
+          },
+          "fit_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Null means not assessed. A number requires fit_summary."
+          },
+          "fit_summary": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "strengths": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "gaps": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "default": []
+          },
+          "recruiter_name": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "recruiter_contact": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "next_action_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "waiting_on": {
+            "type": "string",
+            "enum": [
+              "",
+              "agent",
+              "recruiter",
+              "you"
+            ]
+          },
+          "needs_you": {
+            "type": "boolean",
+            "default": false
+          },
+          "interview_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "interview_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "readOnly": true
+          },
+          "created_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T",
+            "readOnly": true
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T",
+            "readOnly": true
+          },
+          "last_checked_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T",
+            "readOnly": true
+          }
+        },
+        "required": [
+          "id",
+          "source_key",
+          "profile",
+          "company",
+          "title",
+          "url",
+          "description",
+          "stage",
+          "remote",
+          "location",
+          "employment",
+          "salary_min",
+          "salary_max",
+          "currency",
+          "salary_period",
+          "fit_score",
+          "fit_summary",
+          "strengths",
+          "gaps",
+          "skills",
+          "recruiter_name",
+          "recruiter_contact",
+          "next_action",
+          "next_action_at",
+          "waiting_on",
+          "needs_you",
+          "interview_at",
+          "interview_url",
+          "version",
+          "created_at",
+          "updated_at",
+          "last_checked_at"
+        ]
+      },
+      "EventCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Stable unique key per job. Retry the identical event; never resend an external message to retry logging."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "note",
+              "discovered",
+              "application",
+              "message",
+              "follow_up",
+              "interview",
+              "status",
+              "check",
+              "document"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "",
+              "email",
+              "linkedin",
+              "telegram",
+              "ats",
+              "calendar",
+              "manual",
+              "system",
+              "other"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "",
+              "inbound",
+              "outbound",
+              "internal"
+            ]
+          },
+          "contact": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "account": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "thread_id": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "external_id": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "source_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "verification": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "confirmed",
+              "uncertain"
+            ],
+            "default": "recorded",
+            "description": "Caller assertion only; the server does not prove an external action."
+          },
+          "happened_at": {
+            "type": "string",
+            "description": "When it happened, defaults to receipt time if omitted. Retrying an omitted timestamp is safe.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "",
+              "saved",
+              "applied",
+              "talking",
+              "interview",
+              "offer",
+              "hired",
+              "rejected",
+              "archived"
+            ],
+            "description": "Optional stage applied atomically with this event. A recorded state, not send authorization."
+          }
+        },
+        "required": [
+          "source_key",
+          "kind",
+          "summary",
+          "actor"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Stable unique key per job. Retry the identical event; never resend an external message to retry logging."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "note",
+              "discovered",
+              "application",
+              "message",
+              "follow_up",
+              "interview",
+              "status",
+              "check",
+              "document"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "",
+              "email",
+              "linkedin",
+              "telegram",
+              "ats",
+              "calendar",
+              "manual",
+              "system",
+              "other"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "",
+              "inbound",
+              "outbound",
+              "internal"
+            ]
+          },
+          "contact": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "account": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "thread_id": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "external_id": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "source_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL, or empty string; no URL credentials."
+          },
+          "verification": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "confirmed",
+              "uncertain"
+            ],
+            "default": "recorded",
+            "description": "Caller assertion only; the server does not prove an external action."
+          },
+          "happened_at": {
+            "type": "string",
+            "description": "When it happened, defaults to receipt time if omitted. Retrying an omitted timestamp is safe.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "",
+              "saved",
+              "applied",
+              "talking",
+              "interview",
+              "offer",
+              "hired",
+              "rejected",
+              "archived"
+            ],
+            "description": "Optional stage applied atomically with this event. A recorded state, not send authorization."
+          },
+          "id": {
+            "type": "integer"
+          },
+          "job_id": {
+            "type": "integer"
+          },
+          "recorded_at": {
+            "type": "string",
+            "description": "RFC3339 timestamp, or empty string when unknown.",
+            "pattern": "^$|^\\d{4}-\\d{2}-\\d{2}T"
+          }
+        },
+        "required": []
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "JobPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Empty when exhausted; otherwise use as cursor in the next request."
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "EventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Empty when exhausted; otherwise use as cursor in the next request."
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "StatsBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "label",
+          "count"
+        ]
+      },
+      "StatsDay": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "jobs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "events": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "date",
+          "jobs",
+          "events"
+        ]
+      },
+      "Stats": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "saved": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "needs_you": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hired": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rejected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "archived": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsBreakdown"
+            }
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsBreakdown"
+            }
+          },
+          "employment": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsBreakdown"
+            }
+          },
+          "waiting_on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatsBreakdown"
+            }
+          },
+          "days": {
+            "type": "array",
+            "minItems": 30,
+            "maxItems": 30,
+            "items": {
+              "$ref": "#/components/schemas/StatsDay"
+            }
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "required": [
+          "total",
+          "saved",
+          "needs_you",
+          "active",
+          "offers",
+          "hired",
+          "rejected",
+          "archived",
+          "profiles",
+          "remotes",
+          "employment",
+          "waiting_on",
+          "days",
+          "from",
+          "to"
+        ],
+        "description": "Full-profile overview, independent of list filters or pagination. Active = applied/talking/interview; needs_you excludes hired/rejected/archived. Total includes archived. Profiles breakdown always includes both active profiles workspace-wide. Days cover the last 30 UTC dates, jobs by creation and events by occurrence."
+      }
+    }
+  },
+  "paths": {
+    "/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "summary": "List and filter jobs",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "saved",
+                "applied",
+                "talking",
+                "interview",
+                "offer",
+                "hired",
+                "rejected",
+                "archived",
+                "active"
+              ],
+              "description": "active matches applied, talking, interview; it is a filter, not a writable stage."
+            }
+          },
+          {
+            "name": "remote",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unknown",
+                "remote",
+                "hybrid",
+                "onsite"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "needs_you",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only open jobs needing attention; excludes hired/rejected/archived."
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createJob",
+        "summary": "Create job or replay original create payload",
+        "responses": {
+          "200": {
+            "description": "Success / exact replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Quoted version, e.g. \"3\"; use in If-Match."
+              },
+              "Idempotent-Replay": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                "description": "Present on an identical replay."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Quoted version, e.g. \"3\"; use in If-Match."
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "operationId": "getStats",
+        "summary": "Read profile overview and 30-day activity",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sergey",
+                "polina"
+              ],
+              "description": "Omit to aggregate both active profiles."
+            }
+          }
+        ]
+      }
+    },
+    "/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Read complete job and current version",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Quoted version, e.g. \"3\"; use in If-Match."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patchJob",
+        "summary": "Merge editable fields with optimistic concurrency",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Quoted version, e.g. \"3\"; use in If-Match."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\"[1-9][0-9]*\"$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobPatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{id}/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "List append-only timeline records",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "appendEvent",
+        "summary": "Append one event, optionally changing stage atomically",
+        "responses": {
+          "200": {
+            "description": "Success / exact replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            },
+            "headers": {
+              "Idempotent-Replay": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                },
+                "description": "Present on an identical replay."
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input/query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source-key payload conflict or stale version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload over 256 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Expected application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error; no database details disclosed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openAPISpec",
+        "summary": "Read this machine-readable API contract",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 specification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bearer key missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

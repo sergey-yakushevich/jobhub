@@ -16,7 +16,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && adduser -D app
 USER app
 WORKDIR /data
-ENV DB_PATH=/data/jobs.db PORT=8080
+ENV DB_PATH=/data/jobs.db PORT=8080 HOST=0.0.0.0
 COPY --from=build /jobhub /usr/local/bin/jobhub
 EXPOSE 8080
 CMD ["jobhub"]

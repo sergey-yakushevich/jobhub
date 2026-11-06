@@ -1,0 +1,4 @@
+{{define "login"}}{{template "head" .}}
+<main class="login-page"><h1>jobs</h1><div class="login-card">
+  <form action="/login" method="post"><label for="api-key">API key</label><input type="password" id="api-key" name="api_key" required autocomplete="current-password">{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}<button class="button primary" type="submit">sign in</button></form>
+</div></main>{{template "footer" .}}{{end}}

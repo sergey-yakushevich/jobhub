@@ -1,0 +1,21 @@
+{{define "dashboard"}}{{with .Dashboard}}
+<section class="dashboard" aria-label="Profile overview">
+  <div class="tiles">{{range .Tiles}}<a class="tile card{{if .Selected}} selected{{end}}" href="{{.URL}}" {{if .Selected}}aria-current="true"{{end}}><span class="n">{{.Count}}</span><span class="k">{{.Label}}</span></a>{{end}}</div>
+  <div class="card chart-panel">
+    <div class="chart-controls" role="group" aria-label="Activity chart"><button type="button" data-chart="jobs" aria-pressed="true">Jobs</button><button type="button" data-chart="events" aria-pressed="false">Activity</button></div>
+    <svg class="chart" data-chart-series="jobs" viewBox="0 0 600 72" preserveAspectRatio="none" role="group" aria-label="Jobs added each day, last 30 days UTC">
+      {{range .JobBars}}<g class="chart-col" tabindex="0" role="img" aria-label="{{.Title}}" data-tip="{{.Title}}"><title>{{.Title}}</title><rect class="chart-hit" x="{{.X}}" y="0" width="20" height="72"/><rect class="chart-bar" x="{{.X}}" y="{{.Y}}" width="{{.Width}}" height="{{.Height}}" rx="3"/></g>{{end}}
+    </svg>
+    <svg class="chart" data-chart-series="events" viewBox="0 0 600 72" preserveAspectRatio="none" role="group" aria-label="Timeline events each day, last 30 days UTC" hidden>
+      {{range .EventBars}}<g class="chart-col" tabindex="0" role="img" aria-label="{{.Title}}" data-tip="{{.Title}}"><title>{{.Title}}</title><rect class="chart-hit" x="{{.X}}" y="0" width="20" height="72"/><rect class="chart-bar" x="{{.X}}" y="{{.Y}}" width="{{.Width}}" height="{{.Height}}" rx="3"/></g>{{end}}
+    </svg>
+    <div class="chart-axis"><span>{{.From}}</span><span class="chart-readout">jobs per day</span><span>{{.To}}</span></div>
+  </div>
+  <div class="breakdowns">
+    <div class="card breakdown"><h2>profiles</h2>{{range .Stats.Profiles}}<div class="breakdown-row"><a href="{{boardURL .Label}}">{{.Label}}</a><span>{{.Count}}</span></div>{{end}}</div>
+    <div class="card breakdown"><h2>work</h2>{{range .Stats.Remotes}}<div class="breakdown-row"><span>{{.Label}}</span><span>{{.Count}}</span></div>{{else}}<span class="muted">—</span>{{end}}</div>
+    <div class="card breakdown"><h2>contracts</h2>{{range .Stats.Employment}}<div class="breakdown-row"><span>{{.Label}}</span><span>{{.Count}}</span></div>{{else}}<span class="muted">—</span>{{end}}</div>
+    <div class="card breakdown"><h2>waiting on</h2>{{range .Stats.WaitingOn}}<div class="breakdown-row"><span>{{.Label}}</span><span>{{.Count}}</span></div>{{else}}<span class="muted">—</span>{{end}}</div>
+  </div>
+</section>
+{{end}}{{end}}

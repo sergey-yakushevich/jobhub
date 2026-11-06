@@ -1,0 +1,37 @@
+{{define "docs"}}{{template "head" .}}{{template "nav" .}}
+<main class="docs-page">
+  <h1>API</h1>
+  <div class="api-endpoints">
+    <code>GET / POST /api/v1/jobs</code>
+    <code>GET / PATCH /api/v1/jobs/{id}</code>
+    <code>GET / POST /api/v1/jobs/{id}/events</code>
+    <code>GET /api/v1/openapi.json</code>
+    <code>GET /api/v1/stats?profile=sergey</code>
+  </div>
+  <details class="api-detail"><summary>Authentication</summary>
+    <pre><code>Authorization: Bearer $JOBHUB_API_KEY
+Content-Type: application/json</code></pre>
+    <p>Key: <code>.env.local</code>. Bearer header required; browser sessions do not authorize the API.</p>
+  </details>
+  <details class="api-detail"><summary>Examples</summary>
+    <h2>Create job</h2><pre><code>POST /api/v1/jobs
+{"source_key":"acme:backend","company":"Acme","title":"Backend Engineer"}</code></pre>
+    <h2>Log event</h2><pre><code>POST /api/v1/jobs/1/events
+{"source_key":"email:42","kind":"message","summary":"Interview requested","actor":"Alex","channel":"email","direction":"inbound"}</code></pre>
+    <h2>Update job</h2><pre><code>PATCH /api/v1/jobs/1
+If-Match: "3"
+{"next_action":"Confirm interview","needs_you":true}</code></pre>
+  </details>
+  <details class="api-detail"><summary>Write rules & filters</summary>
+    <ul>
+      <li><code>source_key</code>: identical retries return <code>200</code>; changed payloads return <code>409</code>. New records return <code>201</code>.</li>
+      <li>PATCH requires the current <code>ETag</code> in <code>If-Match</code>. Missing: <code>428</code>; stale: <code>409</code>. Events also advance the version.</li>
+      <li>Timeline is append-only. Optional event <code>stage</code> changes the job atomically. Logging never sends anything.</li>
+      <li><code>confirmed</code> is the recorder's assertion. Only <code>check</code> events advance <code>last_checked_at</code>.</li>
+      <li>Job filters: <code>profile</code>, <code>stage</code>, <code>remote</code>, <code>needs_you</code>, <code>q</code>.</li>
+      <li><code>stage=active</code>: applied, talking or interview. Stats are a full profile overview, independent of list filters. Daily counts cover 30 UTC days.</li>
+      <li>Lists return <code>items</code> and <code>next_cursor</code>. Continue with <code>cursor</code> and <code>limit</code> (1–100).</li>
+      <li>Clear numbers with <code>null</code>, strings with <code>""</code>, lists with <code>[]</code>. Errors: <code>{"error":{"code":"…","message":"…"}}</code>.</li>
+    </ul>
+  </details>
+</main>{{template "footer" .}}{{end}}

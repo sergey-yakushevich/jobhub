@@ -1,162 +1,160 @@
-# jobhub
+# JobHub
 
-Run your job hunt on autopilot — without handing over the wheel. Point your
-AI agents at jobhub and they scan the internet for roles that match your
-skills, score them onto your board, prep each application, and apply — but
-nothing is ever sent until you've approved it.
+A small, private job manager and append-only timeline. Agents do the work elsewhere;
+JobHub records the jobs, applications, recruiter conversations, and next steps.
+It does **not** send messages, apply to jobs, run a browser, or create calendar invites.
 
-jobhub is the self-hosted hub of that loop: one Go binary, one SQLite file,
-no accounts. A small JSON API for the agents, a dark little dashboard for
-you, and a human approval gate between the two.
+Go + SQLite. Server-rendered UI, no frontend build or external assets.
 
-![the board](docs/board.png)
-
-## How it works
-
-Leads arrive as batches on `POST /api/jobs` and upsert by `dedupe_key`, so
-re-running a sweep refreshes scores without duplicating rows or resetting
-what you've already read. Each lead then walks a pipeline that lives in
-columns on its own row:
-
-- **to-prep** → found and scored, with a mandatory `score_reason` (a bare `8`
-  is not a judgement anyone can re-read a week later)
-- **to-review** → an agent attached the review artifact: summary, fit, what
-  the application form asks, open questions, a tailored-CV link
-- **approved / rejected** → the human gate, one click each on the lead's own
-  page; nothing gets applied to without an approval, and rejections require a
-  written reason
-- **applied** → the application is out and monitoring takes over
-
-Every lead carries the derived `status` field in JSON — `to-prep`,
-`to-review`, `approved`, `applied`, `rejected`, `hired` — so an agent and the
-board always read the same ladder.
-
-Once applied, the lead's page grows an **application** section on top: where
-the application stands (`in_process` → `rejected` / `hired`), when its
-progress was last checked, and an append-only timeline of everything that
-happened — emails, DMs, status changes — newest first. Monitoring agents feed
-it through the API: push an event when the inbox held something, stamp
-`/checked` when it held nothing, and both move the "last checked" clock.
-
-The board is shared by any number of seekers via `profile`, filters compose
-through query params (`?profile=&net=&type=&new=1&approved=1&since=7d…`), and
-every board URL is also an API call — the JSON endpoint takes the same params.
-
-Each seeker is a row in `profiles` with a description the agents can read:
-summary, skills, experience and working conditions, on a page of its own at
-`/profiles/{slug}`. Leads and profiles are many-to-many. Every lead has one
-owner — the board whose sweep found it, which is also its dedupe scope — and
-can be shared with any number of other profiles through `job_profiles`. A
-shared lead appears on both boards as **one row**: share it instead of pushing
-it twice, or two people work the same posting without either of them seeing it.
-
-![one lead's review page](docs/lead.png)
-
-Pages are gated by short per-page keys derived from a single secret
-(`hex(HMAC-SHA256(VIEW_KEY, scope))[:8]`), so a shared link exposes one page,
-not the whole board. Key guessing is rate-limited, everything is served with
-`X-Robots-Tag: noindex` and a deny-all robots.txt.
-
-## Typed scoring (Jev)
-
-With Cloudflare credentials set (`CLOUDFLARE_ACCOUNT_ID`,
-`CLOUDFLARE_API_TOKEN`), every **newly ingested** lead is judged by
-TypeSafe's Jev model (`typesafe/jev` on Workers AI) — one call, nine typed
-questions, no free text. The verdict lands as two columns next to the sweep's
-score:
-
-- **workable** — yes / blocked / unknown, from four knockout gates: is it a
-  real paid role, how it pays, whether the location rule includes Georgia,
-  and whether the apply route actually works. A knockout is a gate, not a low
-  score: a cofounder equity hunt is `blocked` even if the stack matches.
-- **fit 0-10** — a weighted expectation over five fit axes (go_depth,
-  stack_overlap, domain, seniority, frontend_load) with named levels. The
-  weights live in `internal/jev/scorecard.go`, derived from this board's own
-  approve/reject history, and can be changed and replayed against the stored
-  `fit_detail` audit JSON without re-calling the model.
-
-Division of labour, on purpose: dates and counts are parsed in code and
-handed to Jev as plain text (it reads numbers as prose); dead-posting
-detection stays with the sweep's resolver (an HTTP check), and a lead whose
-real posting was never resolved can be at best `unknown`. Existing rows are
-never backfilled — `workable = ''` keeps meaning "never judged this way".
-
-The board sorts and filters on both (`?sort=fit`, `?workable=yes`), and the
-JSON API carries `fit`, `workable` and the full `fit_detail` audit blob.
-
-## Run it
+## Local preview
 
 ```sh
-API_TOKEN=change-me VIEW_KEY=change-me-too go run ./cmd/jobhub
+sh scripts/dev.sh
+# http://127.0.0.1:8096
 ```
 
-or with Docker:
+On first run this generates a 256-bit API key in **`.env.local`** (mode `0600`,
+Git-ignored), builds `.local/jobhub`, and seeds **three clearly fictional jobs**
+in `.local/preview.db`. Existing data is never reset on restart. The existing
+provider-credential `.env` is not sourced or modified. No production connection.
+
+Sign in with `JOBHUB_API_KEY` from `.env.local`. The browser receives an opaque,
+HttpOnly, SameSite=Strict session; the API key is never stored in browser JavaScript
+or URLs. Sessions expire in seven days and are revoked on server restart.
+
+## Interface
+
+- Compact jobs list with All/Sergey/Polina selection, search, and clickable stage/attention stats.
+- Timeline visible from the first contact, before or after applying.
+- Actual messages, actor, channel, direction, source links and verification state.
+- Salary range/currency/period; remote **and** geographic eligibility; match score
+  with strengths and gaps. Unknown salary/score remains `null`.
+- Next action, waiting-on owner, needs-you flag, and interview time/link.
+- Production JobHub styling: system font, rounded cards, blue accents and dark/light themes.
+- Profile overview: jobs, needs-you, in-progress, offers, hired and rejected;
+  30-day jobs/activity chart and profile/work/contract/waiting-on breakdowns.
+  These are full-profile counts, not just the current list page or filters.
+- Manual job creation, editing, and timeline logging. None of these sends anything.
+
+## Agent API
+
+All routes use `Authorization: Bearer $JOBHUB_API_KEY`. Read the in-app
+**Agent API** page or fetch **`GET /api/v1/openapi.json`** for the full OpenAPI 3.1
+contract. Generate the checked-in specification with `python3 scripts/generate-openapi.py`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET / POST | `/api/v1/jobs` | Filter jobs / create with stable `source_key` |
+| GET / PATCH | `/api/v1/jobs/{id}` | Read / merge editable fields |
+| GET / POST | `/api/v1/jobs/{id}/events` | Read / append timeline |
+| GET | `/api/v1/stats?profile=sergey` | Full profile totals, breakdowns and 30 UTC days |
 
 ```sh
-docker build -t jobhub .
-docker run -d -p 8080:8080 -v jobhub_data:/data \
-  -e API_TOKEN=change-me -e VIEW_KEY=change-me-too jobhub
+set -a; . ./.env.local; set +a
+curl -fsS "$BASE_URL/api/v1/jobs?profile=sergey" \
+  -H "Authorization: Bearer $JOBHUB_API_KEY"
+
+curl -fsS "$BASE_URL/api/v1/jobs" \
+  -H "Authorization: Bearer $JOBHUB_API_KEY" \
+  -H 'Content-Type: application/json' --data '{
+    "source_key":"acme:backend-123:sergey", "profile":"sergey",
+    "company":"Acme", "title":"Senior Go Engineer", "remote":"remote",
+    "location":"EMEA; Georgia eligibility unconfirmed"
+  }'
 ```
 
-Push a first lead and open the link the response gives you:
+### Write guarantees
 
-```sh
-curl -X POST localhost:8080/api/jobs -H 'Authorization: Bearer change-me' \
-  -H 'Content-Type: application/json' -d '{"jobs":[{
-    "dedupe_key":"example-1","network":"reddit","author":"someone",
-    "title":"[HIRING] Senior Go dev","url":"https://example.com/post",
-    "score":8,"score_reason":"stack match, remote, contract ok"}]}'
-# -> {"added":1,"link":"/jobs?k=..."}
-```
+- Job identity is `(profile, source_key)`. An identical create retry returns the
+  same job, including after later edits; a different create payload is `409`.
+- Event identity is `(job_id, source_key)`. Identical retries return the original
+  event; changed content is `409`. New writes return `201`; replays return `200`
+  with `Idempotent-Replay: true`.
+- Read the job `ETag` and pass it as `If-Match: "3"` when PATCHing. Missing version:
+  `428`; stale version: `409`. New events also increment the job version.
+- An event may carry `stage` to record a stage transition in the same transaction.
+  A PATCH stage change adds a status event. No implicit application/HR send.
+- Only `check` events move `last_checked_at`, using the actual check time and never
+  moving it backward. This is an overview field, **not** a per-channel message cursor.
+- Events are append-only. Record corrections as new notes. `confirmed` is the
+  caller's assertion, not external verification performed by JobHub.
+- Lists return `{items, next_cursor}`, newest record ID first; pass `cursor` and
+  `limit` (1–100) to continue. Unknown fields and invalid types/enums are rejected.
+- `stage=active` filters applied/talking/interview jobs. It is not a writable stage.
+  `needs_you=true` excludes hired, rejected and archived jobs. Stats use the same definitions;
+  their profiles breakdown is workspace-wide, while other values use the requested profile.
+- Errors: `{"error":{"code":"invalid_request","message":"…"}}`.
 
-## Environment
+## Authentication and scope
 
-| Var | Meaning |
+One owner API key grants access to the whole workspace, including every profile.
+Profiles are organizational labels, **not** separate authorization tenants.
+Active profiles are `sergey` and `polina`; new jobs accept only these two.
+Retired profile history is preserved, but is not offered in the profile selector.
+The All view includes Sergey and Polina only; new jobs always belong to one profile.
+Browser cookies never authorize `/api/v1`. Browser writes use a separate `/ui`
+surface requiring the session, same-origin request, and per-session CSRF token.
+Login attempts are throttled; pages have no-store, no-referrer, and a restrictive CSP.
+This is stronger than short URL keys, but not multi-user RBAC or per-agent scopes.
+
+Rotate the key by replacing `JOBHUB_API_KEY` in the private env file and restarting
+the process. Existing browser sessions stop working. Keep the key out of logs,
+screenshots, URLs, conversation records, and source control.
+
+## Configuration
+
+| Variable | Meaning |
 | --- | --- |
-| `API_TOKEN` | Bearer token for `/api/*` (required) |
-| `VIEW_KEY` | Secret the page link keys are derived from (required) |
-| `BASE_URL` | Public URL of the app, e.g. `https://board.example.com` (default `http://localhost:8080`) |
-| `DB_PATH` | SQLite file (default `jobs.db`; the Docker image uses `/data/jobs.db`) |
-| `PORT` | Listen port (default `8080`) |
-| `DEFAULT_PROFILE` | Who owns leads pushed without a `profile` (default `me`) |
-| `PROFILES` | Comma-separated seekers whose board chips exist before their first lead |
-| — | The binary ships with three described profiles (`internal/seed`). They are written on boot into empty fields only, so an edit made through `POST /api/profiles` always wins |
-| `ELEVENLABS_API_KEY` | Enables voice notes: the approve composer's recordings are transcribed and saved as the review note. Unset, recording stays an on-page preview |
-| `ELEVENLABS_STT_MODEL` | Speech-to-text model (default `scribe_v2`) |
-| `ELEVENLABS_BASE_URL` | Override the ElevenLabs endpoint (proxies, tests) |
+| `JOBHUB_API_KEY` | Required; at least 32 characters. Generate randomly. |
+| `HOST` | Default `127.0.0.1`; local by default. |
+| `PORT` | Default `8096`. |
+| `BASE_URL` | Canonical origin; no path. Browser writes must match it. |
+| `DB_PATH` | Default `jobs.db`; dev script uses `.local/preview.db`. |
+| `JOBHUB_DEMO` | `1` to seed fictional data into an empty workspace. |
 
-## API
+Non-loopback binding requires an HTTPS `BASE_URL`; use a TLS reverse proxy and
+private application listener for deployment. Forwarded auth/origin headers are
+not trusted. Docker binds to `0.0.0.0:8080` inside its private network and requires
+an HTTPS `BASE_URL`; do not publish that port publicly.
 
-All `/api/*` calls take `Authorization: Bearer $API_TOKEN`. `{id}` accepts a
-row id or a `dedupe_key`.
+## Existing data / API compatibility
 
-| Endpoint | What it does |
-| --- | --- |
-| `POST /api/jobs` | Ingest a batch (`{"jobs":[…]}`); upserts by `dedupe_key`, non-empty fields win |
-| `GET /api/jobs` | Leads as JSON; same filter params as the board. `?status=` filters by the derived ladder (a STAGE — `to-prep` excludes applied/rejected rows), `?app=` by application standing; the raw flag params (`prepped=`, `approved=`, `applied=`, `rejected=`) still work |
-| `POST /api/jobs/{id}/applied` | Mark applied (`{"applied":false}` undoes) |
-| `POST /api/jobs/{id}/rejected` | Rule out: `{"reason":"…"}` required |
-| `POST /api/jobs/{id}/approved` | Clear for applying (`{"approved":false}` undoes) |
-| `POST /api/jobs/{id}/prep` | Attach the review artifact (opaque JSON; empty clears) |
-| `POST /api/jobs/{id}/duplicate` | Link a repost to its canonical row (`{"of":"…"}`) |
-| `POST /api/jobs/{id}/appstatus` | Where the sent application stands: `{"status":"in_process"\|"rejected"\|"hired"}`; a change writes its own timeline event |
-| `POST /api/jobs/{id}/events` | Append to the application timeline: `{"kind":"email","note":"…","at":"RFC3339?"}`; also stamps `checked_at` |
-| `GET /api/jobs/{id}/events` | The timeline, newest first |
-| `POST /api/jobs/{id}/checked` | "Checked, nothing new" — moves `checked_at` and nothing else |
-| `POST /api/jobs/{id}/profiles` | Share the lead with another seeker (`{"profile":"polina"}`; `{"linked":false}` unshares, the owner cannot be unlinked) |
-| `GET /api/profiles` | Every seeker, with description and lead count |
-| `GET /api/profiles/{slug}` | One seeker |
-| `POST /api/profiles` | Write a description (`{"slug":"sergey","conditions":"…"}`); non-empty fields win, like a lead push |
-| `DELETE /api/jobs`, `DELETE /api/jobs/{id}` | Purge everything / delete one lead |
+The new default executable serves only the new workspace/API. The old `?k=` links,
+`API_TOKEN`/`VIEW_KEY` login flow, and `/api/jobs` approval/prep routes are not mounted.
+Agent integrations must use `/api/v1`; legacy endpoints intentionally return 404.
 
-The board's own buttons (approve, reject, applied, application status, notes)
-post with the page's link
-key instead of the API token, so the review works from a phone. That includes
-`POST /jobs/{id}/voice`: the composer records a voice note in the browser,
-posts the audio there, and the ElevenLabs transcript is saved as the review
-note while the lead is approved — the spoken version of typing a caveat and
-hitting send.
+An additive, one-time migration copies legacy `jobs` and `job_events` into tracker
+tables and preserves the original tables unchanged, including old prep artifacts.
+Existing event IDs are retained; legacy application/rejection dates become
+explicit imported timeline events, without changing the current job stage.
+It is **not a live two-way sync**; do not run old and new binaries writing the same
+database. Before deployment, take a consistent SQLite backup and rehearse migration
+on a copy. Verify legacy table fingerprints, IDs, event counts and integrity.
 
-## License
+## Production release
 
-[MIT](LICENSE)
+- Existing service: `jobhub` on the private `kamal` Docker network, persistent
+  `jobhub_data:/data`, behind the `jobs.cyberjosef.dev` TLS proxy (`/up` health check).
+- Build an immutable Linux amd64 image from the committed revision. Keep secrets,
+  databases, and `.local` outside the build context and Git.
+- Configure `JOBHUB_API_KEY`, `BASE_URL=https://jobs.cyberjosef.dev`,
+  `HOST=0.0.0.0`, `PORT=8080`, `DB_PATH=/data/jobs.db`, `JOBHUB_DEMO=0` in a
+  private mode-0600 env file. Local production credentials live in `.env.production`.
+- Stop the old writer, make the final backup, then start the new image on the same
+  volume. Keep the old stopped container and its environment for rollback.
+- Verify public HTTPS health, rejected unauthenticated API requests, authenticated
+  stats and board pages, and unchanged legacy rows before declaring success.
+- Rollback: stop the new writer before starting the retained old container. Legacy
+  tables are unchanged; preserve the current database too if any new-workspace
+  writes occurred, since those do not synchronize back to the old tables.
+
+## Verify
+
+```sh
+go test ./...
+go test -race ./internal/workspace ./internal/store
+go vet ./...
+```
+
+Legacy code and its tests remain in `internal/httpapi` for historical compatibility
+reference, not as a reachable authentication bypass. MIT licensed.

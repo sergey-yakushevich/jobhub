@@ -1,0 +1,64 @@
+{{define "job"}}{{template "head" .}}{{template "nav" .}}
+<main class="detail-page" data-job-id="{{.Job.ID}}" data-version="{{.Job.Version}}">
+  <h1>{{if .Job.FitScore}}<span class="score" title="Match score out of 10">{{fit .Job.FitScore}}</span>{{end}}{{.Job.Company}} · {{.Job.Title}} <span class="status-badge {{.Job.Stage}}">{{.Job.Stage}}</span></h1>
+  <div class="meta detail-meta">{{.Job.Profile}} · <button class="text-button" type="button" data-open="job-dialog">edit</button>{{if .Job.URL}} · <a href="{{.Job.URL}}" target="_blank" rel="noopener noreferrer">posting ↗</a>{{end}}</div>
+
+  <section class="box"><dl class="facts">
+    <dt>Work</dt><dd><span class="remote-{{.Job.Remote}}">{{.Job.Remote}}</span>{{if .Job.Employment}} · {{.Job.Employment}}{{end}}</dd>
+    <dt>Location</dt><dd>{{if .Job.Location}}{{.Job.Location}}{{else}}—{{end}}</dd>
+    <dt>Salary</dt><dd>{{salary .Job}}</dd>
+    {{if .Job.InterviewAt}}<dt>Interview</dt><dd><time datetime="{{.Job.InterviewAt}}" data-date="short">{{when .Job.InterviewAt}}</time>{{if .Job.InterviewURL}} · <a href="{{.Job.InterviewURL}}" target="_blank" rel="noopener noreferrer">join ↗</a>{{end}}</dd>{{end}}
+    {{if or .Job.RecruiterName .Job.RecruiterContact}}<dt>Contact</dt><dd>{{.Job.RecruiterName}}{{if and .Job.RecruiterName .Job.RecruiterContact}} · {{end}}{{.Job.RecruiterContact}}</dd>{{end}}
+  </dl>
+    {{if .Job.Skills}}<div class="skill-tags">{{range .Job.Skills}}<span>{{.}}</span>{{end}}</div>{{end}}
+    <details class="match-details"><summary>match {{if .Job.FitScore}}{{fit .Job.FitScore}}/10{{else}}—{{end}}</summary>
+      {{if .Job.FitSummary}}<p>{{.Job.FitSummary}}</p>{{end}}
+      {{if .Job.Strengths}}<h3>strengths</h3><ul class="fit-list strengths">{{range .Job.Strengths}}<li>{{.}}</li>{{end}}</ul>{{end}}
+      {{if .Job.Gaps}}<h3>gaps</h3><ul class="fit-list gaps">{{range .Job.Gaps}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    </details>
+    {{if .Job.Description}}<details class="role-details"><summary>role</summary><p class="role-description">{{.Job.Description}}</p></details>{{end}}
+  </section>
+
+  {{if .Job.NextAction}}<section class="box next-step {{if .Job.NeedsYou}}needs-you{{end}}">
+    <h2>{{if .Job.NeedsYou}}needs you{{else}}next{{end}}</h2><div class="body">{{.Job.NextAction}}</div>
+    {{if or .Job.WaitingOn .Job.NextActionAt}}<div class="meta">{{if and .Job.WaitingOn (not (and .Job.NeedsYou (eq .Job.WaitingOn "you")))}}waiting on {{.Job.WaitingOn}}{{if .Job.NextActionAt}} · {{end}}{{end}}{{if .Job.NextActionAt}}<time datetime="{{.Job.NextActionAt}}" data-date="short">{{when .Job.NextActionAt}}</time>{{end}}</div>{{end}}
+  </section>{{end}}
+
+  <section class="box timeline-section"><h2>timeline</h2>
+    <form id="event-form" class="note-composer" data-job-id="{{.Job.ID}}">
+      <label class="sr-only" for="event-summary">Timeline update</label><input id="event-summary" name="summary" placeholder="add an update" required maxlength="2000" autocomplete="off">
+      <div class="kind-row" aria-label="Log an event">
+        <button class="event-kind-button note" type="submit" name="kind" value="note" title="Log a note">＋ note</button><button class="event-kind-button applied" type="submit" name="kind" value="application" title="Log an application">✓ applied</button><button class="event-kind-button message" type="submit" name="kind" value="message" title="Log a message">↗ message</button><button class="event-kind-button follow_up" type="submit" name="kind" value="follow_up" title="Log a follow-up">↳ follow-up</button><button class="event-kind-button interview" type="submit" name="kind" value="interview" title="Log an interview">◷ interview</button><button class="event-kind-button check" type="submit" name="kind" value="check" title="Log an inbox check">◌ checked</button>
+      </div>
+      <details class="event-options"><summary>details</summary>
+        <label>Message<textarea name="body" rows="4"></textarea></label>
+        <div class="form-grid">
+          <label>Channel<select name="channel"><option value="manual">manual</option><option value="email">email</option><option value="linkedin">LinkedIn</option><option value="telegram">Telegram</option><option value="ats">ATS</option><option value="calendar">calendar</option><option value="other">other</option></select></label>
+          <label>Direction<select name="direction"><option value="internal">internal</option><option value="inbound">inbound</option><option value="outbound">outbound</option></select></label>
+          <label>Actor<input name="actor" value="{{.Job.Profile}}" required></label><label>Contact<input name="contact"></label>
+          <label>Source<input type="url" name="source_url" placeholder="https://…"></label>
+          <label>Verification<select name="verification"><option value="recorded">recorded</option><option value="confirmed">confirmed by recorder</option><option value="uncertain">uncertain</option></select></label>
+          <label>When (local)<input type="datetime-local" name="happened_at"></label>
+        </div>
+      </details><div class="form-error" role="alert" hidden></div>
+    </form>
+    <div class="timeline">{{range .Events}}
+      <article class="timeline-event kind-{{.Kind}}">
+        <div class="event-top"><b class="event-kind">{{if eq .Kind "message"}}↗{{else if eq .Kind "interview"}}◷{{else if eq .Kind "application"}}✓{{else if eq .Kind "check"}}◌{{else if eq .Kind "follow_up"}}↳{{else}}＋{{end}} {{label .Kind}}</b><time datetime="{{.HappenedAt}}" data-date="short">{{when .HappenedAt}}</time>{{if eq .Verification "uncertain"}}<span class="needs-label">uncertain</span>{{end}}</div>
+        <div class="event-summary">{{.Summary}}</div>
+        <details class="event-details"><summary>{{if eq .Kind "message"}}message{{else}}details{{end}}</summary>
+          {{if .Body}}<div class="message-body">{{.Body}}</div>{{end}}
+          <dl class="event-metadata">
+            <dt>Actor</dt><dd>{{.Actor}}</dd>{{if .Channel}}<dt>Channel</dt><dd>{{.Channel}}</dd>{{end}}{{if .Direction}}<dt>Direction</dt><dd>{{.Direction}}</dd>{{end}}
+            {{if .Contact}}<dt>Contact</dt><dd>{{.Contact}}</dd>{{end}}{{if .Account}}<dt>Account</dt><dd>{{.Account}}</dd>{{end}}
+            <dt>Verification</dt><dd>{{if eq .Verification "confirmed"}}confirmed by recorder{{else}}{{.Verification}}{{end}}</dd>
+            <dt>Recorded</dt><dd><time datetime="{{.RecordedAt}}" data-date="full">{{when .RecordedAt}}</time></dd>
+            <dt>Source key</dt><dd>{{.SourceKey}}</dd>{{if .ThreadID}}<dt>Thread</dt><dd>{{.ThreadID}}</dd>{{end}}{{if .ExternalID}}<dt>Message ID</dt><dd>{{.ExternalID}}</dd>{{end}}
+          </dl>
+          {{if .SourceURL}}<a class="source-link" href="{{.SourceURL}}" target="_blank" rel="noopener noreferrer">source ↗</a>{{end}}
+        </details>
+      </article>
+    {{else}}<p class="muted">No updates yet.</p>{{end}}</div>
+    {{if .NextURL}}<a class="button secondary load-more" href="{{.NextURL}}">earlier →</a>{{end}}
+  </section>
+</main>{{template "job-form" .}}{{template "footer" .}}{{end}}
