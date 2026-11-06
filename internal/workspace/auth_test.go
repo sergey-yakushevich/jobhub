@@ -193,6 +193,8 @@ func TestLoginRequiresConfiguredOrigin(t *testing.T) {
 	}{
 		{"missing origin", "", nil},
 		{"foreign origin", "https://evil.example", nil},
+		{"opaque origin", "null", nil},
+		{"opaque origin cannot use referer fallback", "null", map[string]string{"Referer": s.origin + "/login"}},
 		{"foreign origin with forwarded host", "https://evil.example", map[string]string{
 			"X-Forwarded-Host": "127.0.0.1:8096", "X-Forwarded-Proto": "http",
 		}},
@@ -227,6 +229,21 @@ func TestLoginRequiresConfiguredOrigin(t *testing.T) {
 			t.Fatalf("status = %d, want 403", rec.Code)
 		}
 	})
+}
+
+func TestNativeFormsRetainSameOriginProvenance(t *testing.T) {
+	s := newTestServer(t, "https://jobs.example.test")
+	for _, path := range []string{"/login", "/jobs"} {
+		rec := doReq(t, s, newRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Referrer-Policy"); got != "same-origin" {
+			t.Fatalf("%s policy = %q; native POST must retain origin without external referrer leakage", path, got)
+		}
+	}
+	// A browser retaining its origin can submit the native password form.
+	rec := postLogin(t, s, testKey, s.origin, "")
+	if rec.Code != http.StatusSeeOther || len(rec.Result().Cookies()) != 1 {
+		t.Fatal("same-origin native form login failed", rec.Code)
+	}
 }
 
 func TestLoginThrottlePerRemoteAddress(t *testing.T) {

@@ -185,7 +185,10 @@ func (s *Server) securityHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("Pragma", "no-cache")
-	h.Set("Referrer-Policy", "no-referrer")
+	// Native POST forms inherit this policy. no-referrer makes browsers send
+	// Origin: null, breaking our strict login/logout origin checks. same-origin
+	// retains same-site form provenance without leaking URLs to external sites.
+	h.Set("Referrer-Policy", "same-origin")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Robots-Tag", "noindex, nofollow")

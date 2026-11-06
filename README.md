@@ -94,7 +94,9 @@ Retired profile history is preserved, but is not offered in the profile selector
 The All view includes Sergey and Polina only; new jobs always belong to one profile.
 Browser cookies never authorize `/api/v1`. Browser writes use a separate `/ui`
 surface requiring the session, same-origin request, and per-session CSRF token.
-Login attempts are throttled; pages have no-store, no-referrer, and a restrictive CSP.
+Login attempts are throttled; pages have no-store, a same-origin referrer policy
+(no referrer sent to external sites), and a restrictive CSP. Native sign-in/sign-out
+forms retain their origin for the strict request-origin check.
 This is stronger than short URL keys, but not multi-user RBAC or per-agent scopes.
 
 Rotate the key by replacing `JOBHUB_API_KEY` in the private env file and restarting
