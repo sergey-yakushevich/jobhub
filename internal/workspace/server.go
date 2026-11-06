@@ -6,6 +6,7 @@ package workspace
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,15 +23,15 @@ type Server struct {
 	Store *store.Store
 	Demo  bool
 
-	key      string
-	keyHash  [sha256.Size]byte
-	origin   string
-	originOK bool
-	secure   bool
-	sessions map[string]*session
-	failures map[string]*attempt
-	muValue  sync.Mutex
-	now      func() time.Time
+	key       string
+	keyHash   [sha256.Size]byte
+	origin    string
+	originOK  bool
+	secure    bool
+	authScope string
+	failures  map[string]*attempt
+	muValue   sync.Mutex
+	now       func() time.Time
 }
 
 // New builds a server. A blank key means nothing authenticates (fail closed).
@@ -43,7 +44,6 @@ func New(st *store.Store, key, origin string, demo bool) *Server {
 		Demo:     demo,
 		key:      key,
 		origin:   normalizeOrigin(origin),
-		sessions: make(map[string]*session),
 		failures: make(map[string]*attempt),
 		now:      timeNow,
 	}
@@ -51,6 +51,8 @@ func New(st *store.Store, key, origin string, demo bool) *Server {
 	s.secure = strings.HasPrefix(s.origin, "https://")
 	if key != "" {
 		s.keyHash = sha256.Sum256([]byte(key))
+		scope := sha256.Sum256([]byte("jobhub browser sessions v1\x00" + s.origin + "\x00" + key))
+		s.authScope = hex.EncodeToString(scope[:])
 	}
 	return s
 }

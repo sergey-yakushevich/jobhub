@@ -3,9 +3,12 @@ package workspace
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sergey-yakushevich/jobhub/internal/store"
 )
 
 func TestAPIRejectsNonBearerCredentials(t *testing.T) {
@@ -157,6 +160,9 @@ func TestLoginCookieAttributesFollowOriginScheme(t *testing.T) {
 			}
 			if c.MaxAge != int(sessionTTL/time.Second) {
 				t.Errorf("MaxAge = %d, want %d", c.MaxAge, int(sessionTTL/time.Second))
+			}
+			if c.MaxAge != 365*24*60*60 || c.Expires.IsZero() {
+				t.Fatal("browser cookie must persist for one year")
 			}
 			if c.Value == "" || c.Value == testKey {
 				t.Error("cookie value must be an opaque token, not the key")
@@ -344,11 +350,73 @@ func TestSessionExpiryOnRead(t *testing.T) {
 	}
 
 	// The expired session is removed on read.
-	s.muValue.Lock()
-	n := len(s.sessions)
-	s.muValue.Unlock()
-	if n != 0 {
-		t.Errorf("sessions remaining after expiry = %d, want 0", n)
+	if _, _, err := s.Store.ReadBrowserSession(sessionKey(cookie.Value), s.authScope, s.now()); err == nil {
+		t.Fatal("expired session retained")
+	}
+}
+
+func TestYearLongSessionSurvivesRestartAndRetainsRevocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "persistent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	s := New(st, testKey, "https://jobs.example.test", false)
+	fixedClock(s, start)
+	cookie, csrf := login(t, s)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	restarted := New(st, testKey, s.origin, false)
+	fixedClock(restarted, start.Add(364*24*time.Hour))
+	if r := getWithCookie(t, restarted, "/jobs", cookie); r.Code != 200 {
+		t.Fatal("deployment/browser cookie no longer authenticates", r.Code)
+	}
+	if restarted.CSRF(newCookieRequest(cookie)) != csrf {
+		t.Fatal("CSRF token lost after restart")
+	}
+	for _, changed := range []*Server{New(st, testKey+"-rotated", s.origin, false), New(st, testKey, "https://other.example.test", false), New(st, "", s.origin, false)} {
+		fixedClock(changed, start.Add(time.Hour))
+		if r := getWithCookie(t, changed, "/jobs", cookie); r.Code != 303 {
+			t.Fatal("session must be bound to configured key and origin")
+		}
+	}
+	fixedClock(restarted, start.Add(sessionTTL))
+	if r := getWithCookie(t, restarted, "/jobs", cookie); r.Code != 303 {
+		t.Fatal("one-year expiry boundary not enforced")
+	}
+	fixedClock(restarted, start.Add(time.Hour))
+	cookie, csrf = login(t, restarted)
+	if r := postLogout(t, restarted, cookie, csrf, restarted.origin); r.Code != 303 {
+		t.Fatal("logout failed")
+	}
+	afterLogout := New(st, testKey, s.origin, false)
+	fixedClock(afterLogout, start.Add(2*time.Hour))
+	if r := getWithCookie(t, afterLogout, "/jobs", cookie); r.Code != 303 {
+		t.Fatal("revoked session resurrected after restart")
+	}
+}
+
+func newCookieRequest(cookie *http.Cookie) *http.Request {
+	r := newRequest(http.MethodGet, "/jobs", nil)
+	r.AddCookie(cookie)
+	return r
+}
+
+func TestSessionStorageFailureDoesNotIssueCookie(t *testing.T) {
+	s := newTestServer(t, "https://jobs.example.test")
+	if err := s.Store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := postLogin(t, s, testKey, s.origin, "")
+	if r.Code != 500 || len(r.Result().Cookies()) != 0 {
+		t.Fatal("session persistence must fail closed", r.Code)
 	}
 }
 

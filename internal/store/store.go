@@ -46,7 +46,10 @@ func (s *Store) migrate() error {
 	if err := s.migrateEvents(); err != nil {
 		return err
 	}
-	return s.MigrateTracker()
+	if err := s.MigrateTracker(); err != nil {
+		return err
+	}
+	return s.MigrateBrowserSessions()
 }
 
 // addColumn is an idempotent ALTER TABLE: SQLite has no "IF NOT EXISTS" for

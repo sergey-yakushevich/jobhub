@@ -20,7 +20,10 @@ provider-credential `.env` is not sourced or modified. No production connection.
 
 Sign in with `JOBHUB_API_KEY` from `.env.local`. The browser receives an opaque,
 HttpOnly, SameSite=Strict session; the API key is never stored in browser JavaScript
-or URLs. Sessions expire in seven days and are revoked on server restart.
+or URLs. Browser sign-in lasts 365 days and survives browser/server restarts and
+deployments. Session tokens are stored only as hashes in SQLite, bound to the
+configured API key and origin. Signing out revokes the session; changing the API
+key invalidates existing sessions. Clearing browser cookies also signs you out.
 
 ## Interface
 

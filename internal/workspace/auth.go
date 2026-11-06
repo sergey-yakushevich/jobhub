@@ -17,7 +17,7 @@ import (
 
 const (
 	sessionCookie = "jobhub_session"
-	sessionTTL    = 7 * 24 * time.Hour
+	sessionTTL    = 365 * 24 * time.Hour
 
 	// Login throttling: ten failures per quarter hour, per remote address.
 	loginFailureLimit = 10
@@ -74,22 +74,14 @@ func (s *Server) cookieValue(r *http.Request) string {
 // session resolves and expires-on-read the current cookie session.
 func (s *Server) session(r *http.Request) *session {
 	token := s.cookieValue(r)
-	if token == "" {
+	if token == "" || s.key == "" {
 		return nil
 	}
-	key := sessionKey(token)
-	now := s.now()
-	s.muValue.Lock()
-	defer s.muValue.Unlock()
-	sess, ok := s.sessions[key]
-	if !ok {
+	csrf, expires, err := s.Store.ReadBrowserSession(sessionKey(token), s.authScope, s.now())
+	if err != nil {
 		return nil
 	}
-	if !now.Before(sess.expires) {
-		delete(s.sessions, key)
-		return nil
-	}
-	return sess
+	return &session{csrf: csrf, expires: expires}
 }
 
 // CSRF returns the signed-in session's CSRF token, or "" when there is no
@@ -101,27 +93,13 @@ func (s *Server) CSRF(r *http.Request) string {
 	return ""
 }
 
-func (s *Server) newSession(w http.ResponseWriter) {
+func (s *Server) newSession(w http.ResponseWriter) error {
 	token := newToken()
 	csrf := newToken()
 	now := s.now()
-	s.muValue.Lock()
-	s.sessions[sessionKey(token)] = &session{csrf: csrf, expires: now.Add(sessionTTL)}
-	// Opportunistic pruning keeps the map bounded without a background loop.
-	for k, v := range s.sessions {
-		if !now.Before(v.expires) {
-			delete(s.sessions, k)
-		}
+	if err := s.Store.SaveBrowserSession(sessionKey(token), s.authScope, csrf, now.Add(sessionTTL), now); err != nil {
+		return err
 	}
-	if len(s.sessions) > maxFailureEntries {
-		for k := range s.sessions {
-			if k != sessionKey(token) {
-				delete(s.sessions, k)
-				break
-			}
-		}
-	}
-	s.muValue.Unlock()
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -131,14 +109,16 @@ func (s *Server) newSession(w http.ResponseWriter) {
 		Secure:   s.secure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(sessionTTL / time.Second),
+		Expires:  now.Add(sessionTTL),
 	})
+	return nil
 }
 
-func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {
+func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) error {
 	if token := s.cookieValue(r); token != "" {
-		s.muValue.Lock()
-		delete(s.sessions, sessionKey(token))
-		s.muValue.Unlock()
+		if err := s.Store.DeleteBrowserSession(sessionKey(token), s.authScope); err != nil {
+			return err
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -150,6 +130,7 @@ func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(1, 0),
 	})
+	return nil
 }
 
 // originMatches enforces the fixed public origin. Origin wins when present;
@@ -288,7 +269,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.clearLoginFailures(ip)
-	s.newSession(w)
+	if err := s.newSession(w); err != nil {
+		http.Error(w, "Unable to sign in", http.StatusInternalServerError)
+		return
+	}
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
 }
 
@@ -317,7 +301,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	s.destroySession(w, r)
+	if err := s.destroySession(w, r); err != nil {
+		http.Error(w, "Unable to sign out", http.StatusInternalServerError)
+		return
+	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
