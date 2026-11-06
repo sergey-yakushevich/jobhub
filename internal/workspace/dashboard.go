@@ -35,7 +35,7 @@ func buildDashboard(stats *store.TrackerStats, profile, stage string, needsYou b
 		count        int
 		needsYou     bool
 	}{
-		{"jobs", "", stats.Total, false},
+		{"jobs", "", stats.Total - stats.Archived, false},
 		{"needs you", "", stats.NeedsYou, true}, {"in progress", "active", stats.Active, false},
 		{"offers", "offer", stats.Offers, false}, {"rejected", "rejected", stats.Rejected, false},
 		{"hired", "hired", stats.Hired, false},

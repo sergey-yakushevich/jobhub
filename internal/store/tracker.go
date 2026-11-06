@@ -119,8 +119,11 @@ type TrackerFilter struct {
 	Profile string
 	// ActiveProfilesOnly is used by the UI's All view, excluding retired history.
 	ActiveProfilesOnly bool
-	Stage              string
-	Remote             string
+	// ExcludeArchived keeps the normal board focused; explicit archive views
+	// and agent API reads may still include archived records.
+	ExcludeArchived bool
+	Stage           string
+	Remote          string
 	// Query is a case-insensitive contains test over title, company and
 	// description.
 	Query    string
@@ -991,6 +994,9 @@ func (s *Store) ListTrackedJobs(f TrackerFilter) (*TrackerPage, error) {
 	}
 	conds := []string{"1=1"}
 	var args []any
+	if f.ExcludeArchived {
+		conds = append(conds, "stage <> 'archived'")
+	}
 	if f.ActiveProfilesOnly {
 		conds = append(conds, "profile IN ('sergey','polina')")
 	}

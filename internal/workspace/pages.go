@@ -161,7 +161,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 		storeProfile = ""
 	}
 	before, _ := strconv.ParseInt(q.Get("cursor"), 10, 64)
-	p, err := s.Store.ListTrackedJobs(store.TrackerFilter{Profile: storeProfile, ActiveProfilesOnly: true, Stage: d.Stage, Remote: d.Remote, Query: d.Query, NeedsYou: d.NeedsYou, Limit: 50, BeforeID: before})
+	p, err := s.Store.ListTrackedJobs(store.TrackerFilter{Profile: storeProfile, ActiveProfilesOnly: true, ExcludeArchived: d.Stage != "archived", Stage: d.Stage, Remote: d.Remote, Query: d.Query, NeedsYou: d.NeedsYou, Limit: 50, BeforeID: before})
 	if err != nil {
 		http.Error(w, "Unable to load jobs", 500)
 		return

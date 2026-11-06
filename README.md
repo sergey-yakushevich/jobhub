@@ -25,6 +25,9 @@ or URLs. Sessions expire in seven days and are revoked on server restart.
 ## Interface
 
 - Compact jobs list with All/Sergey/Polina selection, search, and clickable stage/attention stats.
+- Archived jobs stay in a separate Archived view, with details and timelines intact.
+  The normal board and Jobs card exclude archived jobs; API lists still include
+  them unless filtered, and API stats retain total/archived counts separately.
 - Timeline visible from the first contact, before or after applying.
 - Actual messages, actor, channel, direction, source links and verification state.
 - Salary range/currency/period; remote **and** geographic eligibility; match score
